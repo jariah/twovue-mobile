@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 import uvicorn
+import os
 from datetime import datetime
 
 # Create the FastAPI app
@@ -25,5 +26,8 @@ async def health_check():
     }
 
 if __name__ == "__main__":
-    print("🚀 Starting minimal Twovue API server on http://0.0.0.0:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    # Use Railway's PORT environment variable, default to 8000
+    port = int(os.getenv("PORT", 8000))
+    print(f"🚀 Starting Twovue API server on 0.0.0.0:{port}")
+    print(f"📊 PORT env var: {os.getenv('PORT', 'not set')}")
+    uvicorn.run(app, host="0.0.0.0", port=port) 
