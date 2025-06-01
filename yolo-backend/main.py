@@ -39,9 +39,29 @@ app.mount("/photos", StaticFiles(directory="photos"), name="photos")
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./twovue.db")
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+
+# Fix PostgreSQL URL format for SQLAlchemy (Railway uses postgres:// but SQLAlchemy needs postgresql://)
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+print(f"📊 Connecting to database: {DATABASE_URL[:50]}...")
+
+try:
+    engine = create_engine(
+        DATABASE_URL, 
+        connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+        pool_pre_ping=True,  # Verify connections before use
+        pool_recycle=300     # Recycle connections every 5 minutes
+    )
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base = declarative_base()
+    print("✅ Database engine created successfully")
+except Exception as e:
+    print(f"❌ Database connection error: {e}")
+    # Continue anyway for debugging
+    engine = None
+    SessionLocal = None
+    Base = None
 
 # Database Models
 class DBGame(Base):
@@ -67,8 +87,16 @@ class DBTurn(Base):
     turn_number = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+# Create tables with error handling
+if engine and Base:
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("✅ Database tables created/verified successfully")
+    except Exception as e:
+        print(f"❌ Database table creation error: {e}")
+        print("⚠️  App will continue but database features may not work")
+else:
+    print("⚠️  Skipping table creation due to database connection issues")
 
 # OpenAI API configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -101,6 +129,8 @@ class GameResponse(BaseModel):
 
 # Database dependency
 def get_db():
+    if not SessionLocal:
+        raise HTTPException(status_code=503, detail="Database not available")
     db = SessionLocal()
     try:
         yield db
@@ -436,6 +466,51 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "openai_configured": bool(OPENAI_API_KEY)
+    }
+
+# Health check endpoint with better diagnostics
+@app.get("/health")
+async def health_check():
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "openai_configured": bool(OPENAI_API_KEY and OPENAI_API_KEY.startswith("sk-")),
+        "database_connected": bool(engine and SessionLocal),
+        "photos_directory": str(PHOTOS_DIR.exists())
+    }
+    
+    # Test database connection
+    if SessionLocal:
+        try:
+            db = SessionLocal()
+            db.execute("SELECT 1")
+            db.close()
+            health_status["database_test"] = "passed"
+        except Exception as e:
+            health_status["database_test"] = f"failed: {str(e)}"
+            health_status["status"] = "degraded"
+    else:
+        health_status["database_test"] = "no_connection"
+        health_status["status"] = "degraded"
+    
+    return health_status
+
+# Add startup event
+@app.on_event("startup")
+async def startup_event():
+    print("🚀 FastAPI app is starting up...")
+    print(f"📊 Database URL: {DATABASE_URL[:50]}...")
+    print(f"🤖 OpenAI configured: {bool(OPENAI_API_KEY and OPENAI_API_KEY.startswith('sk-'))}")
+    print(f"📸 Photos directory: {PHOTOS_DIR}")
+    print("✅ Startup complete, ready to handle requests")
+
+# Simple root endpoint for debugging
+@app.get("/")
+async def root():
+    return {
+        "message": "Twovue Game API is running!",
+        "version": "1.0.0",
+        "status": "online"
     }
 
 if __name__ == "__main__":
