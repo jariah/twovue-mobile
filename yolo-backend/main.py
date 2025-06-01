@@ -1,8 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from ultralytics import YOLO
-from PIL import Image
 import io
 import uvicorn
 import base64
@@ -72,8 +70,7 @@ class DBTurn(Base):
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-# YOLO model for object detection
-model = YOLO("yolov8n.pt")
+# OpenAI API configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # Pydantic Models
@@ -295,7 +292,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str):
         manager.disconnect(websocket, game_id)
         print(f"WebSocket disconnected from game {game_id}")
 
-# Object Detection Endpoints (existing)
+# Object Detection Endpoint (LLM-only)
 @app.post("/detect-llm")
 async def detect_llm(data: ImageData):
     """Use LLM (GPT-4 Vision) to detect objects in the image"""
