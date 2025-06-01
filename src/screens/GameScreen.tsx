@@ -11,6 +11,7 @@ import {
   Image,
   Share,
   Platform,
+  Clipboard,
 } from 'react-native';
 import { Camera, CameraType, CameraView } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
@@ -87,7 +88,7 @@ export function GameScreen() {
   const currentTurn = turns.length + 1;
   const isPlayer1 = playerName === game?.player1Name;
   const isPlayer2 = playerName === game?.player2Name;
-  const myTurn = (isPlayer1 && currentTurn % 2 === 1) || (isPlayer2 && currentTurn % 2 === 0);
+  const myTurn = (isPlayer1 && turns.length % 2 === 0) || (isPlayer2 && turns.length % 2 === 1);
   const prevTurn = turns.length > 0 ? turns[turns.length - 1] : null;
   const prevTags = prevTurn ? prevTurn.tags : [];
 
@@ -236,18 +237,23 @@ export function GameScreen() {
   };
 
   const shareGame = async () => {
-    const message = Platform.OS === 'ios' 
-      ? `twovue://game/${gameId}`
-      : `It's your turn in our Twovue game! Game ID: ${gameId}`;
+    const gameIdDisplay = formatGameIdForDisplay(gameId);
+    const message = `Join my Twovue game! Game ID: ${gameIdDisplay}\n\nOpen the Twovue app and enter this Game ID to join.`;
     
     try {
       await Share.share({
         message,
-        title: 'Your Turn on Twovue!',
+        title: 'Join my Twovue Game!',
       });
     } catch (error) {
       Alert.alert('Error', 'Failed to share game');
     }
+  };
+
+  const copyGameId = async () => {
+    const gameIdDisplay = formatGameIdForDisplay(gameId);
+    Clipboard.setString(gameIdDisplay);
+    Alert.alert('Copied!', `Game ID "${gameIdDisplay}" copied to clipboard`);
   };
 
   if (loading || hasPermission === null) {
@@ -278,7 +284,12 @@ export function GameScreen() {
           <View style={styles.header}>
             <View style={styles.labelFrame}>
               <Text style={styles.figureLabel}>FIG. {currentTurn}A — CAPTURE SESSION</Text>
-              <Text style={styles.gameId}>GAME ID: {formatGameIdForDisplay(gameId)}</Text>
+              <View style={styles.gameIdContainer}>
+                <Text style={styles.gameId}>GAME ID: {formatGameIdForDisplay(gameId)}</Text>
+                <TouchableOpacity onPress={copyGameId} style={styles.copyButton}>
+                  <Text style={styles.copyButtonText}>COPY</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
 
@@ -419,7 +430,7 @@ export function GameScreen() {
             <View style={styles.turnSubmittedFrame}>
               <Text style={styles.successText}>ANALYSIS SUBMITTED</Text>
               <ScientificButton
-                title="Notify Operator"
+                title="Share Game ID"
                 onPress={shareGame}
                 variant="accent"
                 style={styles.shareButton}
@@ -468,8 +479,20 @@ const styles = StyleSheet.create({
     color: theme.colors.graphiteBlack,
     marginBottom: theme.spacing.xs,
   },
+  gameIdContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   gameId: {
     ...theme.typography.secondary,
+    fontSize: theme.typography.sizes.xs,
+    color: theme.colors.fadedInkBlue,
+  },
+  copyButton: {
+    padding: theme.spacing.md,
+  },
+  copyButtonText: {
+    ...theme.typography.primary,
     fontSize: theme.typography.sizes.xs,
     color: theme.colors.fadedInkBlue,
   },

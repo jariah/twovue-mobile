@@ -1,3 +1,4 @@
+import * as FileSystem from 'expo-file-system';
 import { Game, Turn, DetectionResult } from '../types/game';
 import { MockGameAPI } from './mockApi';
 
@@ -57,6 +58,36 @@ export class GameAPI {
     }
   }
 
+  static async uploadPhoto(photoUri: string): Promise<string> {
+    if (USE_MOCK_API) {
+      // For mock API, just return the local URI
+      return photoUri;
+    }
+    
+    // Create FormData for file upload
+    const formData = new FormData();
+    formData.append('file', {
+      uri: photoUri,
+      type: 'image/jpeg',
+      name: 'photo.jpg',
+    } as any);
+    
+    const response = await fetch(`${API_BASE_URL}/upload-photo`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to upload photo');
+    }
+    
+    const result = await response.json();
+    return result.photo_url;
+  }
+
   static async submitTurn(
     gameId: string,
     turnData: {
@@ -71,10 +102,19 @@ export class GameAPI {
       return MockGameAPI.submitTurn(gameId, turnData);
     }
     
+    // First upload the photo if it's a local URI
+    let photoUrl = turnData.photo_url;
+    if (photoUrl.startsWith('file://')) {
+      photoUrl = await this.uploadPhoto(photoUrl);
+    }
+    
     const response = await fetch(`${API_BASE_URL}/games/${gameId}/turns`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(turnData),
+      body: JSON.stringify({
+        ...turnData,
+        photo_url: photoUrl,
+      }),
     });
     
     if (!response.ok) {
@@ -82,64 +122,56 @@ export class GameAPI {
     }
   }
 
-  static async detectObjects(imageUri: string): Promise<DetectionResult> {
-    // Always use real backend for object detection
-    
+  static async detectObjects(photoUri: string): Promise<{ labels: string[]; debug?: any; raw_response?: string }> {
     try {
-      console.log(`Detecting objects using LLM for image:`, imageUri);
-      
-      // Fetch the image and convert to base64
-      const response = await fetch(imageUri);
-      const blob = await response.blob();
-      
-      // Convert blob to base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onloadend = () => {
-          if (reader.result) {
-            // Extract just the base64 data without the data:image/jpeg;base64, prefix
-            const base64 = (reader.result as string).split(',')[1];
-            resolve(base64);
-          } else {
-            reject(new Error('Failed to convert image to base64'));
+      // Convert photo to base64
+      const base64 = await FileSystem.readAsStringAsync(photoUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      if (USE_MOCK_API) {
+        // Use local backend if available, otherwise fall back to mock
+        try {
+          const response = await fetch('http://192.168.1.204:8000/detect-llm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: base64 }),
+          });
+
+          if (response.ok) {
+            return response.json();
           }
+        } catch (error) {
+          console.log('Local backend not available, using mock data');
+        }
+        
+        // Fallback to mock data
+        const mockObjects = [
+          "person", "chair", "table", "laptop", "phone", "cup", 
+          "book", "pen", "window", "door", "floor", "wall",
+          "light", "picture frame", "plant", "bag", "bottle", "keyboard"
+        ];
+        
+        return {
+          labels: mockObjects.slice(0, Math.floor(Math.random() * 8) + 10),
+          debug: { source: 'mock_fallback' }
         };
-        reader.onerror = reject;
-      });
+      }
       
-      reader.readAsDataURL(blob);
-      const base64Data = await base64Promise;
-      
-      // Choose endpoint based on detection method
-      const endpoint = '/detect-llm';
-      
-      console.log(`Sending base64 image to ${endpoint}`);
-      const detectionResponse = await fetch(`${LLM_API_URL}${endpoint}`, {
+      // Use live API
+      const response = await fetch(`${API_BASE_URL}/detect-llm`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: base64Data,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64 }),
       });
-      
-      if (!detectionResponse.ok) {
-        const errorText = await detectionResponse.text();
-        console.error('Backend error:', detectionResponse.status, errorText);
-        throw new Error(`Backend error: ${detectionResponse.status}`);
+
+      if (!response.ok) {
+        throw new Error('Detection service unavailable');
       }
-      
-      const result = await detectionResponse.json();
-      console.log('Detection result:', result);
-      
-      if (result.error) {
-        throw new Error(result.error);
-      }
-      
-      return result;
-    } catch (error: any) {
-      console.error('Detection error details:', error);
+
+      return response.json();
+    } catch (error) {
+      console.error('Object detection error:', error);
       throw error;
     }
   }

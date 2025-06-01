@@ -2,11 +2,14 @@ import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   SafeAreaView,
   ScrollView,
   Alert,
   RefreshControl,
+  TouchableOpacity,
+  Clipboard,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Storage } from '../utils/storage';
@@ -23,6 +26,7 @@ export function DashboardScreen() {
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [joinGameId, setJoinGameId] = useState<string>('');
 
   const loadData = async () => {
     try {
@@ -80,6 +84,30 @@ export function DashboardScreen() {
 
   const joinGame = (gameId: string) => {
     navigation.navigate('Game', { gameId });
+  };
+
+  const copyGameId = (gameId: string) => {
+    const gameIdDisplay = formatGameIdForDisplay(gameId);
+    Clipboard.setString(gameIdDisplay);
+    Alert.alert('Copied!', `Game ID "${gameIdDisplay}" copied to clipboard`);
+  };
+
+  const joinGameManually = async () => {
+    if (!joinGameId.trim()) {
+      Alert.alert('Error', 'Please enter a game ID');
+      return;
+    }
+
+    const gameIdToJoin = joinGameId.trim().toLowerCase().replace(/\s+/g, '-');
+    
+    try {
+      // Add to our games list and navigate
+      await Storage.addGameId(gameIdToJoin);
+      setJoinGameId(''); // Clear input
+      navigation.navigate('Game', { gameId: gameIdToJoin });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to join game. Please try again.');
+    }
   };
 
   const getGameStatus = (game: Game) => {
@@ -140,6 +168,35 @@ export function DashboardScreen() {
             />
           </View>
 
+          {/* Join existing session */}
+          <View style={styles.joinFrame}>
+            <Text style={styles.sectionTitle}>JOIN EXISTING SESSION</Text>
+            <Text style={styles.joinInstructions}>
+              Enter the Game ID shared by another operator:
+            </Text>
+            <View style={styles.joinInputContainer}>
+              <TextInput
+                style={styles.joinInput}
+                value={joinGameId}
+                onChangeText={setJoinGameId}
+                placeholder="QUANTUM VECTOR ALPHA"
+                placeholderTextColor={theme.colors.softGridGray}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="done"
+                onSubmitEditing={joinGameManually}
+              />
+              <View style={styles.inputUnderline} />
+            </View>
+            <ScientificButton
+              title="Join Session"
+              onPress={joinGameManually}
+              variant="secondary"
+              size="medium"
+              disabled={!joinGameId.trim()}
+            />
+          </View>
+
           {/* Active sessions */}
           <View style={styles.sessionsFrame}>
             <Text style={styles.sectionTitle}>
@@ -165,9 +222,17 @@ export function DashboardScreen() {
                   return (
                     <View key={game.id} style={styles.gameCard}>
                       <View style={styles.gameHeader}>
-                        <Text style={styles.gameId}>
-                          SESSION: {formatGameIdForDisplay(game.id)}
-                        </Text>
+                        <View style={styles.gameIdSection}>
+                          <Text style={styles.gameId}>
+                            SESSION: {formatGameIdForDisplay(game.id)}
+                          </Text>
+                          <TouchableOpacity 
+                            onPress={() => copyGameId(game.id)} 
+                            style={styles.copyButton}
+                          >
+                            <Text style={styles.copyButtonText}>COPY</Text>
+                          </TouchableOpacity>
+                        </View>
                         <View style={[styles.statusBadge, { borderColor: statusColor }]}>
                           <Text style={[styles.statusText, { color: statusColor }]}>
                             {status}
@@ -301,10 +366,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: theme.spacing.md,
   },
+  gameIdSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   gameId: {
     ...theme.typography.primary,
     fontSize: theme.typography.sizes.sm,
     color: theme.colors.graphiteBlack,
+  },
+  copyButton: {
+    padding: theme.spacing.sm,
+  },
+  copyButtonText: {
+    ...theme.typography.primary,
+    fontSize: theme.typography.sizes.sm,
+    color: theme.colors.fadedInkBlue,
   },
   statusBadge: {
     borderWidth: theme.layout.borderWidth.normal,
@@ -327,5 +404,32 @@ const styles = StyleSheet.create({
   },
   joinButton: {
     alignSelf: 'flex-start',
+  },
+  joinFrame: {
+    marginHorizontal: theme.spacing.margin.mobile,
+    marginBottom: theme.spacing.xl,
+    borderWidth: theme.layout.borderWidth.normal,
+    borderColor: theme.colors.fadedInkBlue,
+    padding: theme.spacing.lg,
+    alignItems: 'center',
+  },
+  joinInstructions: {
+    ...theme.typography.primary,
+    fontSize: theme.typography.sizes.sm,
+    color: theme.colors.graphiteBlack,
+    marginBottom: theme.spacing.sm,
+  },
+  joinInputContainer: {
+    marginBottom: theme.spacing.lg,
+  },
+  joinInput: {
+    ...theme.typography.primary,
+    fontSize: theme.typography.sizes.sm,
+    color: theme.colors.graphiteBlack,
+    padding: theme.spacing.sm,
+  },
+  inputUnderline: {
+    height: 1,
+    backgroundColor: theme.colors.softGridGray,
   },
 }); 
