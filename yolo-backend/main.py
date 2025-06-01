@@ -482,6 +482,14 @@ async def detect_llm(data: ImageData):
             # Fallback to mock data on API errors
             print(f"OpenAI API error: {response.status_code}")
             
+            # Log the error response body for debugging
+            try:
+                error_body = response.json()
+                print(f"OpenAI Error Response: {error_body}")
+            except:
+                error_text = response.text
+                print(f"OpenAI Error Text: {error_text}")
+            
             base_objects = [
                 "person", "chair", "table", "laptop", "phone", "cup", 
                 "book", "pen", "window", "door", "floor", "wall",
