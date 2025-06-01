@@ -292,6 +292,14 @@ async def join_game(game_id: str, request: JoinGameRequest, db: Session = Depend
     db.commit()
     
     print(f"Player {request.player2_name} joined game {game_id}")
+    
+    # Broadcast player joined event
+    await manager.broadcast_to_game(game_id, {
+        "type": "player_joined",
+        "player_name": request.player2_name,
+        "message": f"{request.player2_name} joined the game!"
+    })
+    
     return {"message": "Successfully joined game"}
 
 @app.post("/games/{game_id}/turns")
@@ -324,6 +332,15 @@ async def submit_turn(game_id: str, request: SubmitTurnRequest, db: Session = De
     db.commit()
     
     print(f"Turn {turn_number} submitted for game {game_id} by {request.player_name}")
+    
+    # Broadcast turn submitted event
+    await manager.broadcast_to_game(game_id, {
+        "type": "turn_submitted",
+        "player_name": request.player_name,
+        "turn_number": turn_number,
+        "message": f"{request.player_name} submitted turn {turn_number}!"
+    })
+    
     return {"message": "Turn submitted successfully"}
 
 # File Upload Endpoint
@@ -520,6 +537,18 @@ async def debug():
         "openai": openai_status,
         "timestamp": datetime.utcnow().isoformat()
     }
+
+# WebSocket endpoint
+@app.websocket("/ws/{game_id}")
+async def websocket_endpoint(websocket: WebSocket, game_id: str):
+    await manager.connect(websocket, game_id)
+    try:
+        while True:
+            # Keep connection alive - just wait for messages
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, game_id)
+        print(f"WebSocket disconnected from game {game_id}")
 
 if __name__ == "__main__":
     # Use Railway's PORT environment variable, default to 8000

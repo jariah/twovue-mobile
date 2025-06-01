@@ -3,11 +3,11 @@ import { Game, Turn, DetectionResult } from '../types/game';
 import { MockGameAPI } from './mockApi';
 
 // Configure your backend URL here
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
-const LLM_API_URL = process.env.EXPO_PUBLIC_LLM_URL || 'http://192.168.1.204:8000';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://twovue-mobile-production.up.railway.app';
+const LLM_API_URL = process.env.EXPO_PUBLIC_LLM_URL || 'https://twovue-mobile-production.up.railway.app';
 
-// Set to true to use mock API (for testing without backend)
-const USE_MOCK_API = true;
+// Set to false to use live API (Railway deployment)
+const USE_MOCK_API = false;
 
 export class GameAPI {
   static async createGame(player1Name: string): Promise<{ game_id: string }> {
@@ -130,21 +130,6 @@ export class GameAPI {
       });
 
       if (USE_MOCK_API) {
-        // Use local backend if available, otherwise fall back to mock
-        try {
-          const response = await fetch('http://192.168.1.204:8000/detect-llm', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: base64 }),
-          });
-
-          if (response.ok) {
-            return response.json();
-          }
-        } catch (error) {
-          console.log('Local backend not available, using mock data');
-        }
-        
         // Fallback to mock data
         const mockObjects = [
           "person", "chair", "table", "laptop", "phone", "cup", 
@@ -158,21 +143,46 @@ export class GameAPI {
         };
       }
       
+      console.log('🔍 Calling live API:', LLM_API_URL);
+      console.log('📱 Base64 length:', base64.length);
+      
       // Use live API
-      const response = await fetch(`${API_BASE_URL}/detect-llm`, {
+      const response = await fetch(`${LLM_API_URL}/detect-llm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: base64 }),
       });
 
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response ok:', response.ok);
+
       if (!response.ok) {
-        throw new Error('Detection service unavailable');
+        const errorText = await response.text();
+        console.error('❌ API Error:', response.status, errorText);
+        throw new Error(`Detection service returned ${response.status}: ${errorText}`);
       }
 
-      return response.json();
+      const result = await response.json();
+      console.log('✅ API Success:', result.debug?.source, result.labels?.length, 'objects');
+      return result;
     } catch (error) {
-      console.error('Object detection error:', error);
-      throw error;
+      console.error('💥 Object detection error:', error);
+      
+      // Fallback to mock data on any error
+      const mockObjects = [
+        "person", "chair", "table", "laptop", "phone", "cup", 
+        "book", "pen", "window", "door", "floor", "wall",
+        "light", "picture frame", "plant", "bag", "bottle", "keyboard"
+      ];
+      
+      return {
+        labels: mockObjects.slice(0, Math.floor(Math.random() * 8) + 10),
+        debug: { 
+          source: 'mock_fallback_after_error',
+          error: error instanceof Error ? error.message : String(error),
+          api_url: LLM_API_URL
+        }
+      };
     }
   }
 } 

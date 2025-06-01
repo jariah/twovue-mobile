@@ -23,6 +23,7 @@ import { GridBackground } from '../components/GridBackground';
 import { ScientificButton } from '../components/ScientificButton';
 import { theme } from '../styles/theme';
 import { formatGameIdForDisplay } from '../utils/gameIdGenerator';
+import { WebSocketService } from '../services/websocket';
 
 export function GameScreen() {
   const route = useRoute<any>();
@@ -82,6 +83,35 @@ export function GameScreen() {
       }
     })();
   }, []);
+
+  // WebSocket connection for real-time updates
+  useEffect(() => {
+    if (!gameId) return;
+
+    const wsService = WebSocketService.getInstance(gameId);
+    wsService.connect('https://twovue-mobile-production.up.railway.app');
+    
+    const handleMessage = (message: any) => {
+      console.log('🔔 WebSocket message received:', message);
+      
+      if (message.type === 'player_joined') {
+        Alert.alert('Player Joined!', `${message.player_name} joined the game!`);
+        loadGame(); // Reload to show updated game state
+      }
+      
+      if (message.type === 'turn_submitted') {
+        Alert.alert('Turn Submitted!', `${message.player_name} submitted their turn!`);
+        loadGame(); // Reload to show new turn
+      }
+    };
+    
+    wsService.addListener(handleMessage);
+    
+    return () => {
+      wsService.removeListener(handleMessage);
+      // Don't disconnect here - keep connection alive for the game
+    };
+  }, [gameId, loadGame]);
 
   // Game logic calculations
   const turns = game?.turns || [];
@@ -179,9 +209,9 @@ export function GameScreen() {
     if (currentTurn === 1) {
       return selectedObjects.length === 3;
     }
-    // Must have at least one shared tag
-    const hasShared = prevTags.some((tag) => detectedObjects.includes(tag));
-    return hasShared && selectedObjects.length === 2;
+    // For turn 2+: Must have at least one shared tag and user selects 2 additional
+    const sharedTag = prevTags.find((tag) => detectedObjects.includes(tag));
+    return sharedTag && selectedObjects.length === 2;
   };
 
   const submitTurn = async () => {
@@ -193,23 +223,24 @@ export function GameScreen() {
     }
 
     if (currentTurn > 1) {
-      const shared = prevTags.find((tag) => detectedObjects.includes(tag));
-      if (!shared) {
+      const sharedTag = prevTags.find((tag) => detectedObjects.includes(tag));
+      if (!sharedTag) {
         setError('Your photo must contain at least one of the previous tags.');
         return;
       }
       if (selectedObjects.length !== 2) {
-        setError('Please select exactly 2 new tags.');
+        setError('Please select exactly 2 new tags (the shared tag is automatically included).');
         return;
       }
 
       try {
-        const tags = [shared, ...selectedObjects];
+        // Combine shared tag with user-selected tags
+        const allTags = [sharedTag, ...selectedObjects];
         await GameAPI.submitTurn(gameId, {
           player_name: playerName,
           photo_url: photo!,
-          tags,
-          shared_tag: shared,
+          tags: allTags,
+          shared_tag: sharedTag,
           detected_tags: detectedObjects,
         });
         setTurnSubmitted(true);
@@ -376,34 +407,71 @@ export function GameScreen() {
                       <Text style={styles.sectionTitle}>
                         OBJECT CLASSIFICATION ({detectedObjects.length} DETECTED):
                       </Text>
+                      
+                      {/* Show shared tag info for turn 2+ */}
+                      {currentTurn > 1 && (
+                        <View style={styles.sharedTagInfo}>
+                          {(() => {
+                            const sharedTag = prevTags.find((tag) => detectedObjects.includes(tag));
+                            return sharedTag ? (
+                              <Text style={styles.sharedTagText}>
+                                🔗 SHARED TAG: {sharedTag.toUpperCase()} (automatically included)
+                              </Text>
+                            ) : (
+                              <Text style={styles.errorText}>
+                                ⚠️ No shared tag detected. Photo must contain one of: {prevTags.join(', ').toUpperCase()}
+                              </Text>
+                            );
+                          })()}
+                        </View>
+                      )}
+                      
                       <ScrollView 
                         horizontal 
                         showsHorizontalScrollIndicator={false}
                         style={styles.objectsScrollView}
                       >
                         <View style={styles.objectsGrid}>
-                          {detectedObjects.map((object, index) => (
-                            <TouchableOpacity
-                              key={object}
-                              style={[
-                                styles.objectButton,
-                                selectedObjects.includes(object) && styles.objectButtonSelected,
-                              ]}
-                              onPress={() => toggleObject(object)}
-                            >
-                              <Text style={styles.objectIndex}>{index + 1}</Text>
-                              <Text
+                          {detectedObjects.map((object, index) => {
+                            const isSharedTag = currentTurn > 1 && prevTags.includes(object);
+                            const isSelected = selectedObjects.includes(object);
+                            const isDisabled = isSharedTag; // Shared tags are auto-included, not selectable
+                            
+                            return (
+                              <TouchableOpacity
+                                key={object}
                                 style={[
-                                  styles.objectButtonText,
-                                  selectedObjects.includes(object) && styles.objectButtonTextSelected,
+                                  styles.objectButton,
+                                  isSelected && styles.objectButtonSelected,
+                                  isSharedTag && styles.objectButtonShared,
+                                  isDisabled && styles.objectButtonDisabled,
                                 ]}
+                                onPress={() => !isDisabled && toggleObject(object)}
+                                disabled={isDisabled}
                               >
-                                {object.toUpperCase()}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
+                                <Text style={styles.objectIndex}>{index + 1}</Text>
+                                <Text
+                                  style={[
+                                    styles.objectButtonText,
+                                    isSelected && styles.objectButtonTextSelected,
+                                    isSharedTag && styles.objectButtonTextShared,
+                                  ]}
+                                >
+                                  {object.toUpperCase()}
+                                  {isSharedTag && ' 🔗'}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
                         </View>
                       </ScrollView>
+
+                      <Text style={styles.selectionHint}>
+                        {currentTurn === 1 
+                          ? `Select exactly 3 tags (${selectedObjects.length}/3 selected)`
+                          : `Select exactly 2 new tags (${selectedObjects.length}/2 selected)`
+                        }
+                      </Text>
 
                       <ScientificButton
                         title="Submit Analysis"
@@ -414,33 +482,33 @@ export function GameScreen() {
                       />
                     </View>
                   )}
+
+                  {error && (
+                    <View style={styles.errorFrame}>
+                      <Text style={styles.errorLabel}>ERROR:</Text>
+                      <Text style={styles.errorText}>{error}</Text>
+                    </View>
+                  )}
                 </View>
               )}
 
-              {error && (
-                <View style={styles.errorFrame}>
-                  <Text style={styles.errorLabel}>ERROR:</Text>
-                  <Text style={styles.errorText}>{error}</Text>
+              {turnSubmitted && (
+                <View style={styles.turnSubmittedFrame}>
+                  <Text style={styles.successText}>ANALYSIS SUBMITTED</Text>
+                  <ScientificButton
+                    title="Share Game ID"
+                    onPress={shareGame}
+                    variant="accent"
+                    style={styles.shareButton}
+                  />
                 </View>
               )}
-            </View>
-          )}
 
-          {turnSubmitted && (
-            <View style={styles.turnSubmittedFrame}>
-              <Text style={styles.successText}>ANALYSIS SUBMITTED</Text>
-              <ScientificButton
-                title="Share Game ID"
-                onPress={shareGame}
-                variant="accent"
-                style={styles.shareButton}
-              />
-            </View>
-          )}
-
-          {!myTurn && (
-            <View style={styles.waitingFrame}>
-              <Text style={styles.waitingText}>AWAITING OPERATOR RESPONSE...</Text>
+              {!myTurn && (
+                <View style={styles.waitingFrame}>
+                  <Text style={styles.waitingText}>AWAITING OPERATOR RESPONSE...</Text>
+                </View>
+              )}
             </View>
           )}
         </ScrollView>
@@ -659,6 +727,14 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.archiveRed,
     borderColor: theme.colors.archiveRed,
   },
+  objectButtonShared: {
+    backgroundColor: theme.colors.fadedInkBlue,
+    borderColor: theme.colors.fadedInkBlue,
+  },
+  objectButtonDisabled: {
+    backgroundColor: theme.colors.softGridGray,
+    borderColor: theme.colors.softGridGray,
+  },
   objectIndex: {
     ...theme.typography.secondary,
     fontSize: theme.typography.sizes.xs,
@@ -672,6 +748,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   objectButtonTextSelected: {
+    color: theme.colors.agedVellum,
+  },
+  objectButtonTextShared: {
     color: theme.colors.agedVellum,
   },
   submitButton: {
@@ -727,5 +806,19 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.sizes.md,
     color: theme.colors.fadedInkBlue,
     textAlign: 'center',
+  },
+  sharedTagInfo: {
+    marginBottom: theme.spacing.lg,
+  },
+  sharedTagText: {
+    ...theme.typography.primary,
+    fontSize: theme.typography.sizes.sm,
+    color: theme.colors.fadedInkBlue,
+  },
+  selectionHint: {
+    ...theme.typography.primary,
+    fontSize: theme.typography.sizes.sm,
+    color: theme.colors.fadedInkBlue,
+    marginBottom: theme.spacing.lg,
   },
 }); 
