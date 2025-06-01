@@ -494,6 +494,43 @@ async def health_check():
     
     return health_status
 
+# Simple health check endpoint (no database test to avoid timeouts)
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": "twovue-api",
+        "version": "1.0.0"
+    }
+
+# Detailed health check endpoint with database test
+@app.get("/health/detailed")
+async def detailed_health_check():
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "openai_configured": bool(OPENAI_API_KEY and OPENAI_API_KEY.startswith("sk-")),
+        "database_connected": bool(engine and SessionLocal),
+        "photos_directory": str(PHOTOS_DIR.exists())
+    }
+    
+    # Test database connection (only for detailed endpoint)
+    if SessionLocal:
+        try:
+            db = SessionLocal()
+            db.execute("SELECT 1")
+            db.close()
+            health_status["database_test"] = "passed"
+        except Exception as e:
+            health_status["database_test"] = f"failed: {str(e)}"
+            health_status["status"] = "degraded"
+    else:
+        health_status["database_test"] = "no_connection"
+        health_status["status"] = "degraded"
+    
+    return health_status
+
 if __name__ == "__main__":
     print("🚀 Starting Twovue Game API server on http://0.0.0.0:8000")
     print(f"📊 Database URL: {DATABASE_URL[:50]}...")
