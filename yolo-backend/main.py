@@ -415,6 +415,10 @@ async def detect_llm(data: ImageData):
             "Authorization": f"Bearer {OPENAI_API_KEY}"
         }
         
+        print(f"🔑 API Key length: {len(OPENAI_API_KEY)}")
+        print(f"🔑 API Key starts with: {OPENAI_API_KEY[:10]}...")
+        print(f"🔑 Authorization header length: {len(headers['Authorization'])}")
+        
         # Improved prompt for better results
         payload = {
             "model": "gpt-4o",  # Using GPT-4o which supports vision
@@ -446,6 +450,9 @@ async def detect_llm(data: ImageData):
                 timeout=30.0
             )
             
+        print(f"OpenAI API Response Status: {response.status_code}")
+        print(f"OpenAI API Response Headers: {dict(response.headers)}")
+        
         if response.status_code == 200:
             result = response.json()
             raw_content = result['choices'][0]['message']['content']
