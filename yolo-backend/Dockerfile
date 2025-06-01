@@ -16,8 +16,5 @@ COPY . .
 # Create photos directory
 RUN mkdir -p photos
 
-# Expose the port (Railway will set this via environment)
-EXPOSE $PORT
-
-# Start the application using Railway's PORT environment variable
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port $PORT"] 
+# Let Python script handle the port via environment variable
+CMD ["python", "main.py"] 
