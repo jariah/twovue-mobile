@@ -14,8 +14,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import asyncio
 from sqlalchemy import create_engine, Column, String, DateTime, Text, Integer, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 import shutil
 from pathlib import Path
 
@@ -513,9 +512,13 @@ async def root():
         "status": "online"
     }
 
+# Startup logging moved to main block to avoid deprecation warnings
+
 if __name__ == "__main__":
     print("🚀 Starting Twovue Game API server on http://0.0.0.0:8000")
-    print(f"📊 Database: {DATABASE_URL}")
-    print(f"🤖 OpenAI API Key configured: {'Yes' if OPENAI_API_KEY else 'No (using mock data)'}")
-    print(f"📸 Photos directory: {PHOTOS_DIR.absolute()}")
+    print(f"📊 Database URL: {DATABASE_URL[:50]}...")
+    print(f"🤖 OpenAI configured: {bool(OPENAI_API_KEY and OPENAI_API_KEY.startswith('sk-'))}")
+    print(f"📸 Photos directory: {PHOTOS_DIR}")
+    print(f"🗄️  Database engine: {'OK' if engine else 'Failed'}")
+    print("✅ Starting server...")
     uvicorn.run(app, host="0.0.0.0", port=8000) 
