@@ -126,7 +126,7 @@ class GameResponse(BaseModel):
     updated_at: datetime
     turns: List[dict]
 
-# Database dependency
+# Database dependency with error handling
 def get_db():
     if not SessionLocal:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -191,6 +191,15 @@ def db_game_to_response(db_game: DBGame, db_turns: List[DBTurn]) -> dict:
                 "createdAt": turn.created_at.isoformat()
             } for turn in sorted(db_turns, key=lambda x: x.turn_number)
         ]
+    }
+
+# Simple root endpoint for debugging
+@app.get("/")
+async def root():
+    return {
+        "message": "Twovue Game API is running!",
+        "version": "1.0.0",
+        "status": "online"
     }
 
 # Game Management Endpoints
@@ -458,51 +467,6 @@ async def detect_llm(data: ImageData):
         print(f"Error in detect_llm: {str(e)}")
         return {"error": str(e), "labels": []}
 
-# Health check endpoint
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-        "openai_configured": bool(OPENAI_API_KEY)
-    }
-
-# Health check endpoint with better diagnostics
-@app.get("/health")
-async def health_check():
-    health_status = {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-        "openai_configured": bool(OPENAI_API_KEY and OPENAI_API_KEY.startswith("sk-")),
-        "database_connected": bool(engine and SessionLocal),
-        "photos_directory": str(PHOTOS_DIR.exists())
-    }
-    
-    # Test database connection
-    if SessionLocal:
-        try:
-            db = SessionLocal()
-            db.execute("SELECT 1")
-            db.close()
-            health_status["database_test"] = "passed"
-        except Exception as e:
-            health_status["database_test"] = f"failed: {str(e)}"
-            health_status["status"] = "degraded"
-    else:
-        health_status["database_test"] = "no_connection"
-        health_status["status"] = "degraded"
-    
-    return health_status
-
-# Add startup event
-@app.on_event("startup")
-async def startup_event():
-    print("🚀 FastAPI app is starting up...")
-    print(f"📊 Database URL: {DATABASE_URL[:50]}...")
-    print(f"🤖 OpenAI configured: {bool(OPENAI_API_KEY and OPENAI_API_KEY.startswith('sk-'))}")
-    print(f"📸 Photos directory: {PHOTOS_DIR}")
-    print("✅ Startup complete, ready to handle requests")
-
 # Health check endpoint with detailed diagnostics
 @app.get("/health")
 async def health_check():
@@ -529,17 +493,6 @@ async def health_check():
         health_status["status"] = "degraded"
     
     return health_status
-
-# Simple root endpoint for debugging
-@app.get("/")
-async def root():
-    return {
-        "message": "Twovue Game API is running!",
-        "version": "1.0.0",
-        "status": "online"
-    }
-
-# Startup logging moved to main block to avoid deprecation warnings
 
 if __name__ == "__main__":
     print("🚀 Starting Twovue Game API server on http://0.0.0.0:8000")
