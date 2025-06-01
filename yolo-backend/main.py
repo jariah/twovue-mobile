@@ -503,6 +503,33 @@ async def startup_event():
     print(f"📸 Photos directory: {PHOTOS_DIR}")
     print("✅ Startup complete, ready to handle requests")
 
+# Health check endpoint with detailed diagnostics
+@app.get("/health")
+async def health_check():
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "openai_configured": bool(OPENAI_API_KEY and OPENAI_API_KEY.startswith("sk-")),
+        "database_connected": bool(engine and SessionLocal),
+        "photos_directory": str(PHOTOS_DIR.exists())
+    }
+    
+    # Test database connection
+    if SessionLocal:
+        try:
+            db = SessionLocal()
+            db.execute("SELECT 1")
+            db.close()
+            health_status["database_test"] = "passed"
+        except Exception as e:
+            health_status["database_test"] = f"failed: {str(e)}"
+            health_status["status"] = "degraded"
+    else:
+        health_status["database_test"] = "no_connection"
+        health_status["status"] = "degraded"
+    
+    return health_status
+
 # Simple root endpoint for debugging
 @app.get("/")
 async def root():
