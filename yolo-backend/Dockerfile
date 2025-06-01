@@ -16,8 +16,8 @@ COPY . .
 # Create photos directory
 RUN mkdir -p photos
 
-# Expose port
-EXPOSE 8000
+# Expose the port (Railway will set this via environment)
+EXPOSE $PORT
 
-# Start the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"] 
+# Start the application using Railway's PORT environment variable
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port $PORT"] 
