@@ -498,12 +498,24 @@ async def health_check():
 @app.get("/debug")
 async def debug():
     print("🔍 Debug endpoint hit!")
+    
+    # Check OpenAI API key status without exposing the key
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    openai_status = {
+        "present": bool(openai_key),
+        "length": len(openai_key) if openai_key else 0,
+        "starts_with_sk": openai_key.startswith("sk-") if openai_key else False,
+        "is_mock": openai_key == "mock-key-for-testing",
+        "first_chars": openai_key[:7] + "..." if len(openai_key) > 7 else openai_key
+    }
+    
     return {
         "message": "Debug endpoint working!",
         "env": {
             "PORT": os.getenv("PORT"),
             "HOST": "0.0.0.0"
         },
+        "openai": openai_status,
         "timestamp": datetime.utcnow().isoformat()
     }
 
