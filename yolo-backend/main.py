@@ -100,6 +100,39 @@ else:
 # OpenAI API configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
+# Scientific Game ID Generator (from mobile app)
+SCIENTIFIC_ADJECTIVES = [
+    'quantum', 'atomic', 'neural', 'stellar', 'cosmic', 'optical', 'kinetic', 
+    'thermal', 'magnetic', 'electric', 'photonic', 'sonic', 'crystalline',
+    'molecular', 'orbital', 'plasma', 'gamma', 'alpha', 'beta', 'delta',
+    'micro', 'nano', 'meta', 'ultra', 'hyper', 'neo', 'proto', 'pseudo',
+    'cyber', 'digital', 'analog', 'synthetic', 'organic', 'bionic', 'ionic',
+    'spectral', 'temporal', 'spatial', 'dimensional', 'fractal', 'holographic'
+]
+
+SCIENTIFIC_NOUNS = [
+    'vector', 'matrix', 'prism', 'catalyst', 'reactor', 'generator', 'scanner',
+    'analyzer', 'synthesizer', 'amplifier', 'detector', 'sensor', 'probe',
+    'beacon', 'transmitter', 'receiver', 'oscillator', 'resonator', 'capacitor',
+    'conductor', 'isolator', 'converter', 'processor', 'calculator', 'computer',
+    'algorithm', 'protocol', 'sequence', 'pattern', 'frequency', 'wavelength',
+    'spectrum', 'field', 'chamber', 'module', 'unit', 'device', 'apparatus',
+    'instrument', 'mechanism', 'engine', 'turbine', 'dynamo', 'circuit',
+    'array', 'grid', 'network', 'system', 'core', 'nexus', 'hub', 'node'
+]
+
+SCIENTIFIC_SUFFIXES = [
+    'alpha', 'beta', 'gamma', 'delta', 'omega', 'prime', 'max', 'ultra',
+    'plus', 'neo', 'pro', 'x', 'z', 'one', 'two', 'three', 'seven', 'nine'
+]
+
+def generate_scientific_game_id() -> str:
+    """Generate a whimsical scientific game ID like 'quantum-vector-alpha'"""
+    adjective = random.choice(SCIENTIFIC_ADJECTIVES)
+    noun = random.choice(SCIENTIFIC_NOUNS)
+    suffix = random.choice(SCIENTIFIC_SUFFIXES)
+    return f"{adjective}-{noun}-{suffix}"
+
 # Pydantic Models
 class ImageData(BaseModel):
     image: str  # Base64 encoded image
@@ -217,7 +250,7 @@ async def root():
 @app.post("/games")
 async def create_game(request: CreateGameRequest, db: Session = Depends(get_db)):
     """Create a new game"""
-    game_id = str(uuid.uuid4())
+    game_id = generate_scientific_game_id()
     
     db_game = DBGame(
         id=game_id,
