@@ -339,9 +339,8 @@ async def upload_photo(file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    # Return URL (adjust domain for production)
-    domain = os.getenv("DOMAIN", f"https://twovue-mobile-production.up.railway.app")
-    photo_url = f"{domain}/photos/{filename}"
+    # Return URL - hardcode the correct Railway domain
+    photo_url = f"https://twovue-mobile-production.up.railway.app/photos/{filename}"
     
     print(f"Uploaded photo: {photo_url}")
     return {"photo_url": photo_url}
@@ -513,7 +512,10 @@ async def debug():
         "message": "Debug endpoint working!",
         "env": {
             "PORT": os.getenv("PORT"),
-            "HOST": "0.0.0.0"
+            "HOST": "0.0.0.0",
+            "DOMAIN": os.getenv("DOMAIN", "not_set"),
+            "DATABASE_URL_length": len(os.getenv("DATABASE_URL", "")),
+            "DATABASE_URL_starts": os.getenv("DATABASE_URL", "")[:30] + "..." if os.getenv("DATABASE_URL") else "not_set"
         },
         "openai": openai_status,
         "timestamp": datetime.utcnow().isoformat()
