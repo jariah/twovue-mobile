@@ -711,6 +711,34 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str):
         manager.disconnect(websocket, game_id)
         print(f"WebSocket disconnected from game {game_id}")
 
+# Debug endpoint to list all games
+@app.get("/debug/games")
+async def list_all_games(db: Session = Depends(get_db)):
+    """List all games in the database"""
+    print("📋 Listing all games")
+    
+    db_games = db.query(DBGame).order_by(DBGame.created_at.desc()).all()
+    
+    games_info = []
+    for game in db_games:
+        # Count turns for each game
+        turn_count = db.query(DBTurn).filter(DBTurn.game_id == game.id).count()
+        
+        games_info.append({
+            "id": game.id,
+            "player1": game.player1_name,
+            "player2": game.player2_name,
+            "status": game.status,
+            "turn_count": turn_count,
+            "created_at": game.created_at.isoformat(),
+            "updated_at": game.updated_at.isoformat()
+        })
+    
+    return {
+        "total_games": len(games_info),
+        "games": games_info
+    }
+
 if __name__ == "__main__":
     # Use Railway's PORT environment variable, default to 8000
     port = int(os.getenv("PORT", 8000))
