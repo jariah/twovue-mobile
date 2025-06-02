@@ -9,16 +9,15 @@ import {
   Alert,
   Image,
   Animated,
-  Dimensions,
   StatusBar,
+  ScrollView,
 } from 'react-native';
 import { Camera, CameraView } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { GameAPI } from '../services/api';
 import { theme } from '../styles/theme';
-
-const { width, height } = Dimensions.get('window');
 
 interface RouteParams {
   gameId: string;
@@ -39,6 +38,7 @@ export function CameraScreen() {
   const [detectedObjects, setDetectedObjects] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false); // Prevent multiple submissions
 
   // Animation values for sci-fi effects
   const scanLineAnim = useRef(new Animated.Value(0)).current;
@@ -101,7 +101,9 @@ export function CameraScreen() {
       });
 
       if (photo) {
-        setPhoto(photo.uri);
+        // Crop the image to match the square viewfinder
+        const croppedPhoto = await cropImageToSquare(photo.uri);
+        setPhoto(croppedPhoto);
         setIsAnalyzing(true);
         startScanAnimation();
 
@@ -112,7 +114,7 @@ export function CameraScreen() {
         }
 
         try {
-          const result = await GameAPI.detectObjects(photo.uri);
+          const result = await GameAPI.detectObjects(croppedPhoto);
           const objects = result.labels.slice(0, 20);
           
           if (objects.length === 0) {
@@ -130,6 +132,45 @@ export function CameraScreen() {
     } catch (error: any) {
       console.error('Camera error:', error);
       setError(`CAPTURE FAILED — ${error.message || 'UNKNOWN ERROR'}`);
+    }
+  };
+
+  const cropImageToSquare = async (imageUri: string): Promise<string> => {
+    try {
+      // Get image dimensions
+      const imageInfo = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [],
+        { format: ImageManipulator.SaveFormat.JPEG }
+      );
+      
+      const { width, height } = imageInfo;
+      
+      // Calculate crop area to create a square from the center
+      const minDimension = Math.min(width, height);
+      const cropX = (width - minDimension) / 2;
+      const cropY = (height - minDimension) / 2;
+      
+      // Crop to square
+      const croppedImage = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [
+          {
+            crop: {
+              originX: cropX,
+              originY: cropY,
+              width: minDimension,
+              height: minDimension,
+            },
+          },
+        ],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      
+      return croppedImage.uri;
+    } catch (error) {
+      console.error('Error cropping image:', error);
+      return imageUri; // Return original if cropping fails
     }
   };
 
@@ -152,40 +193,138 @@ export function CameraScreen() {
   };
 
   const canSubmit = () => {
-    if (currentTurn === 1) {
-      return selectedTags.length === 3;
+    if (isSubmitting) {
+      console.log('❌ Cannot submit: already submitting');
+      return false;
     }
+
+    if (currentTurn === 1) {
+      const result = selectedTags.length === 3;
+      console.log(`🎯 Turn 1 canSubmit: ${result}`, {
+        selectedCount: selectedTags.length,
+        required: 3,
+        selectedTags
+      });
+      return result;
+    }
+    
     // For turn 2+: Must have shared tag and 2 selections
     const sharedTag = prevTags.find(tag => detectedObjects.includes(tag));
-    return sharedTag && selectedTags.length === 2;
+    const result = !!sharedTag && selectedTags.length === 2;
+    
+    console.log(`🎯 Turn ${currentTurn} canSubmit: ${result}`, {
+      sharedTag,
+      prevTags,
+      detectedObjects: detectedObjects.slice(0, 5) + '...', // Limit log output
+      selectedCount: selectedTags.length,
+      required: 2,
+      selectedTags,
+      hasSharedTag: !!sharedTag
+    });
+    
+    if (!sharedTag) {
+      console.warn('⚠️ No shared tag detected between previous tags and current objects');
+      console.warn('Previous tags:', prevTags);
+      console.warn('Current detected objects:', detectedObjects);
+    }
+    
+    return result;
   };
 
   const submitAnalysis = async () => {
-    if (!photo) return;
+    console.log('🚀 Submit Analysis called!');
+    
+    // Prevent multiple submissions
+    if (isSubmitting) {
+      console.log('⚠️ Already submitting, ignoring additional calls');
+      return;
+    }
+    
+    if (!photo) {
+      console.log('❌ No photo, aborting');
+      Alert.alert('ERROR', 'No photo available for submission');
+      return;
+    }
+
+    if (!canSubmit()) {
+      console.log('❌ Cannot submit according to canSubmit()');
+      Alert.alert('ERROR', 'Selection requirements not met');
+      return;
+    }
+
+    setIsSubmitting(true);
 
     try {
-      let finalTags = selectedTags;
+      let finalTags = [...selectedTags]; // Create copy
       let sharedTag = selectedTags[0];
 
       if (currentTurn > 1) {
         const detectedSharedTag = prevTags.find(tag => detectedObjects.includes(tag));
+        
+        console.log('🔍 Turn 2+ submission logic:', {
+          currentTurn,
+          prevTags,
+          detectedSharedTag,
+          selectedTags,
+          detectedObjects: detectedObjects.slice(0, 10)
+        });
+        
         if (detectedSharedTag) {
           finalTags = [detectedSharedTag, ...selectedTags];
           sharedTag = detectedSharedTag;
+          console.log('✅ Added shared tag to submission:', { finalTags, sharedTag });
+        } else {
+          console.error('❌ No shared tag found for turn 2+');
+          Alert.alert('ERROR', 'No shared object detected from previous turn');
+          setIsSubmitting(false);
+          return;
         }
       }
 
-      await GameAPI.submitTurn(gameId, {
+      console.log('📤 Submitting turn with final data:', { 
+        gameId,
+        playerName,
+        currentTurn,
+        finalTags, 
+        sharedTag,
+        photoAvailable: !!photo,
+        detectedObjectsCount: detectedObjects.length
+      });
+
+      const submissionData = {
         player_name: playerName,
         photo_url: photo,
         tags: finalTags,
         shared_tag: sharedTag,
         detected_tags: detectedObjects,
-      });
+      };
 
-      navigation.goBack();
-    } catch (error) {
-      Alert.alert('SUBMISSION FAILED', 'Unable to process analysis');
+      console.log('📡 Making API call...');
+      await GameAPI.submitTurn(gameId, submissionData);
+
+      console.log('✅ Turn submitted successfully');
+      Alert.alert('SUCCESS', 'Analysis submitted successfully!', [
+        { text: 'OK', onPress: () => navigation.goBack() }
+      ]);
+      
+    } catch (error: any) {
+      console.error('❌ Submit error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      Alert.alert(
+        'SUBMISSION FAILED', 
+        `Unable to process analysis: ${error.message || 'Unknown error'}`,
+        [
+          { text: 'Retry', onPress: () => setIsSubmitting(false) },
+          { text: 'Cancel', onPress: () => navigation.goBack() }
+        ]
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -193,14 +332,31 @@ export function CameraScreen() {
     const maxTags = currentTurn === 1 ? 3 : 2;
     const sharedTag = currentTurn > 1 ? prevTags.find(tag => detectedObjects.includes(tag)) : null;
     
+    console.log('🎨 Rendering tag slots:', {
+      currentTurn,
+      maxTags,
+      sharedTag,
+      selectedTagsCount: selectedTags.length,
+      prevTags,
+      detectedObjectsCount: detectedObjects.length
+    });
+    
     return (
       <View style={styles.tagSlotsContainer}>
         {currentTurn > 1 && (
           <View style={[styles.tagSlot, styles.sharedTagSlot]}>
             <Text style={styles.tagSlotLabel}>SHARED</Text>
-            <Text style={styles.sharedTagText}>
+            <Text style={[
+              styles.sharedTagText,
+              !sharedTag && styles.warningText
+            ]}>
               {sharedTag ? sharedTag.toUpperCase() : '⚠️ NONE DETECTED'}
             </Text>
+            {!sharedTag && (
+              <Text style={styles.warningSubtext}>
+                No matching objects found
+              </Text>
+            )}
           </View>
         )}
         
@@ -316,7 +472,7 @@ export function CameraScreen() {
                       transform: [{
                         translateY: scanLineAnim.interpolate({
                           inputRange: [0, 1],
-                          outputRange: [-2, height * 0.6],
+                          outputRange: [-2, 298], // Match the max photo container height (300px - 2px border)
                         }),
                       }],
                     },
@@ -329,8 +485,8 @@ export function CameraScreen() {
                     style={[
                       styles.analysisBox,
                       {
-                        left: Math.random() * width * 0.7,
-                        top: Math.random() * height * 0.4 + 100,
+                        left: Math.random() * 260, // Within photo bounds (300px - 40px box width)
+                        top: Math.random() * 260 + 20, // Within photo bounds with some margin
                         opacity: anim,
                         transform: [{ scale: anim }],
                       },
@@ -347,34 +503,67 @@ export function CameraScreen() {
           </View>
 
           {!isAnalyzing && detectedObjects.length > 0 && (
-            <View style={styles.selectionContainer}>
-              {renderTagSlots()}
-              
-              <View style={styles.objectsContainer}>
-                <Text style={styles.objectsTitle}>DETECTED OBJECTS</Text>
-                <View style={styles.objectsGrid}>
-                  {detectedObjects
-                    .filter(obj => !selectedTags.includes(obj))
-                    .map((object, index) => (
-                      <TouchableOpacity
-                        key={object}
-                        style={styles.objectButton}
-                        onPress={() => selectTag(object)}
-                      >
-                        <Text style={styles.objectText}>{object.toUpperCase()}</Text>
-                      </TouchableOpacity>
-                    ))}
-                </View>
-              </View>
-              
-              <TouchableOpacity
-                style={[styles.submitButton, !canSubmit() && styles.submitButtonDisabled]}
-                onPress={submitAnalysis}
-                disabled={!canSubmit()}
+            <>
+              <ScrollView 
+                style={styles.selectionScrollContainer}
+                contentContainerStyle={styles.selectionContainer}
+                showsVerticalScrollIndicator={true}
+                bounces={false}
               >
-                <Text style={styles.submitText}>SUBMIT ANALYSIS</Text>
-              </TouchableOpacity>
-            </View>
+                {renderTagSlots()}
+                
+                <View style={styles.objectsContainer}>
+                  <Text style={styles.objectsTitle}>DETECTED OBJECTS</Text>
+                  <View style={styles.objectsGrid}>
+                    {detectedObjects
+                      .filter(obj => !selectedTags.includes(obj))
+                      .map((object, index) => (
+                        <TouchableOpacity
+                          key={object}
+                          style={styles.objectButton}
+                          onPress={() => selectTag(object)}
+                        >
+                          <Text style={styles.objectText}>{object.toUpperCase()}</Text>
+                        </TouchableOpacity>
+                      ))}
+                  </View>
+                </View>
+                
+                {/* Bottom spacing to ensure content can scroll past submit button */}
+                <View style={styles.bottomSpacer} />
+              </ScrollView>
+              
+              {/* Fixed submit button at bottom */}
+              <View style={styles.fixedSubmitContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.submitButton, 
+                    (!canSubmit() || isSubmitting) && styles.submitButtonDisabled
+                  ]}
+                  onPress={submitAnalysis}
+                  disabled={!canSubmit() || isSubmitting}
+                  activeOpacity={0.7}
+                >
+                  {isSubmitting ? (
+                    <View style={styles.submittingContainer}>
+                      <ActivityIndicator 
+                        size="small" 
+                        color={theme.colors.archiveRed} 
+                        style={styles.submittingSpinner}
+                      />
+                      <Text style={styles.submitText}>SUBMITTING...</Text>
+                    </View>
+                  ) : (
+                    <Text style={[
+                      styles.submitText, 
+                      (!canSubmit() || isSubmitting) && styles.submitTextDisabled
+                    ]}>
+                      SUBMIT ANALYSIS
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </>
           )}
 
           {error && (
@@ -557,6 +746,7 @@ const styles = StyleSheet.create({
   analysisContainer: {
     flex: 1,
     backgroundColor: theme.colors.background,
+    position: 'relative',
   },
   analysisHeader: {
     flexDirection: 'row',
@@ -578,6 +768,7 @@ const styles = StyleSheet.create({
     aspectRatio: 1, // Square photo display
     width: '85%',
     maxWidth: 300,
+    overflow: 'hidden', // Ensure square clipping
   },
   photo: {
     width: '100%',
@@ -591,6 +782,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    overflow: 'hidden', // Keep scanning elements within bounds
   },
   scanLine: {
     position: 'absolute',
@@ -626,8 +818,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   selectionContainer: {
-    flex: 1,
-    padding: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.xl,
+    paddingTop: theme.spacing.xl,
+    paddingBottom: theme.spacing.lg, // Less bottom padding since we have bottomSpacer
   },
   tagSlotsContainer: {
     flexDirection: 'row',
@@ -706,16 +899,26 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.archiveRed,
     padding: theme.spacing.lg,
     alignItems: 'center',
-    backgroundColor: 'transparent',
+    backgroundColor: theme.colors.background, // Solid background to cover content behind
+    minHeight: 56, // Ensure adequate touch target
+    shadowColor: theme.colors.inkBlack,
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4, // Android shadow
   },
   submitButtonDisabled: {
     borderColor: theme.colors.gridGray,
+    opacity: 0.5,
   },
   submitText: {
     ...theme.typography.secondary,
     fontSize: theme.typography.sizes.md,
     color: theme.colors.archiveRed,
     textTransform: 'uppercase',
+  },
+  submitTextDisabled: {
+    color: theme.colors.gridGray,
   },
   statusText: {
     ...theme.typography.annotation,
@@ -730,5 +933,40 @@ const styles = StyleSheet.create({
     color: theme.colors.archiveRed,
     textAlign: 'center',
     textTransform: 'uppercase',
+  },
+  selectionScrollContainer: {
+    flex: 1,
+  },
+  bottomSpacer: {
+    height: 80, // Height of submit button + padding to ensure scrolling past it
+  },
+  fixedSubmitContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: theme.colors.background,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    paddingHorizontal: theme.spacing.xl,
+    paddingVertical: theme.spacing.lg,
+    paddingBottom: theme.spacing.xl, // Extra bottom padding for safe area
+  },
+  submittingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submittingSpinner: {
+    marginRight: theme.spacing.sm,
+  },
+  warningText: {
+    color: theme.colors.archiveRed,
+  },
+  warningSubtext: {
+    ...theme.typography.annotation,
+    fontSize: theme.typography.sizes.xs,
+    color: theme.colors.archiveRed,
+    textAlign: 'center',
   },
 }); 

@@ -10,6 +10,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   Clipboard,
+  StatusBar,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Storage } from '../utils/storage';
@@ -135,6 +136,11 @@ export function DashboardScreen() {
   if (loading) {
     return (
       <GridBackground>
+        <StatusBar 
+          barStyle="dark-content" 
+          backgroundColor={theme.colors.background} 
+          translucent={false}
+        />
         <SafeAreaView style={styles.container}>
           <Text style={styles.loadingText}>LOADING DASHBOARD...</Text>
         </SafeAreaView>
@@ -144,6 +150,11 @@ export function DashboardScreen() {
 
   return (
     <GridBackground>
+      <StatusBar 
+        barStyle="dark-content" 
+        backgroundColor={theme.colors.background} 
+        translucent={false}
+      />
       <SafeAreaView style={styles.container}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}

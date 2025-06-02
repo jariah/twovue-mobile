@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, StatusBar } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { GridBackground } from '../components/GridBackground';
 import { ScientificButton } from '../components/ScientificButton';
@@ -28,6 +28,11 @@ export function HomeScreen() {
 
   return (
     <GridBackground showDiagonals>
+      <StatusBar 
+        barStyle="dark-content" 
+        backgroundColor={theme.colors.background} 
+        translucent={false}
+      />
       <SafeAreaView style={styles.container}>
         <View style={styles.content}>
           {/* Scientific title block */}

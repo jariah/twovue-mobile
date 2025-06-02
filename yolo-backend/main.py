@@ -600,6 +600,105 @@ async def debug():
         "timestamp": datetime.utcnow().isoformat()
     }
 
+# Debug endpoint for checking duplicates
+@app.get("/debug/duplicates/{game_id}")
+async def check_duplicates(game_id: str, db: Session = Depends(get_db)):
+    """Check for duplicate submissions in a game"""
+    print(f"🔍 Checking duplicates for game: {game_id}")
+    
+    # Get the game
+    db_game = db.query(DBGame).filter(DBGame.id == game_id).first()
+    if not db_game:
+        return {"error": f"Game {game_id} not found"}
+    
+    # Get all turns for this game
+    db_turns = db.query(DBTurn).filter(DBTurn.game_id == game_id).order_by(DBTurn.created_at).all()
+    
+    # Check for duplicates
+    photo_urls = {}
+    duplicates = []
+    
+    for turn in db_turns:
+        photo_key = f"{turn.photo_url}_{turn.player_name}"
+        
+        if photo_key in photo_urls:
+            duplicates.append({
+                "original_turn": {
+                    "id": photo_urls[photo_key].id,
+                    "turn_number": photo_urls[photo_key].turn_number,
+                    "player": photo_urls[photo_key].player_name,
+                    "created_at": photo_urls[photo_key].created_at.isoformat(),
+                    "photo_url": photo_urls[photo_key].photo_url
+                },
+                "duplicate_turn": {
+                    "id": turn.id,
+                    "turn_number": turn.turn_number,
+                    "player": turn.player_name,
+                    "created_at": turn.created_at.isoformat(),
+                    "photo_url": turn.photo_url
+                }
+            })
+        else:
+            photo_urls[photo_key] = turn
+    
+    return {
+        "game_id": game_id,
+        "player1": db_game.player1_name,
+        "player2": db_game.player2_name,
+        "total_turns": len(db_turns),
+        "duplicates_found": len(duplicates),
+        "turns": [
+            {
+                "id": turn.id,
+                "turn_number": turn.turn_number,
+                "player": turn.player_name,
+                "created_at": turn.created_at.isoformat(),
+                "photo_url": turn.photo_url,
+                "tags": json.loads(turn.tags)
+            } for turn in db_turns
+        ],
+        "duplicates": duplicates
+    }
+
+# Debug endpoint for cleaning up duplicates
+@app.delete("/debug/duplicates/{game_id}")
+async def cleanup_duplicates(game_id: str, db: Session = Depends(get_db)):
+    """Remove duplicate submissions, keeping the first one"""
+    print(f"🧹 Cleaning up duplicates for game: {game_id}")
+    
+    # Get all turns for this game
+    db_turns = db.query(DBTurn).filter(DBTurn.game_id == game_id).order_by(DBTurn.created_at).all()
+    
+    # Track seen photo URLs and duplicates to remove
+    seen_photos = set()
+    duplicates_to_remove = []
+    
+    for turn in db_turns:
+        photo_key = f"{turn.photo_url}_{turn.player_name}"
+        
+        if photo_key in seen_photos:
+            duplicates_to_remove.append(turn)
+            print(f"🗑️ Marking duplicate for removal: {turn.id} (Turn {turn.turn_number} by {turn.player_name})")
+        else:
+            seen_photos.add(photo_key)
+            print(f"✅ Keeping original: {turn.id} (Turn {turn.turn_number} by {turn.player_name})")
+    
+    # Remove duplicates
+    removed_count = 0
+    for duplicate in duplicates_to_remove:
+        db.delete(duplicate)
+        removed_count += 1
+    
+    db.commit()
+    
+    return {
+        "game_id": game_id,
+        "total_turns_before": len(db_turns),
+        "duplicates_removed": removed_count,
+        "total_turns_after": len(db_turns) - removed_count,
+        "removed_turn_ids": [dup.id for dup in duplicates_to_remove]
+    }
+
 # WebSocket endpoint
 @app.websocket("/ws/{game_id}")
 async def websocket_endpoint(websocket: WebSocket, game_id: str):

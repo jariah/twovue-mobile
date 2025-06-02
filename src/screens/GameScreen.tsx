@@ -12,6 +12,7 @@ import {
   Share,
   Clipboard,
   Dimensions,
+  StatusBar,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Storage } from '../utils/storage';
@@ -197,6 +198,11 @@ export function GameScreen() {
   if (loading) {
     return (
       <GridBackground>
+        <StatusBar 
+          barStyle="dark-content" 
+          backgroundColor={theme.colors.background} 
+          translucent={false}
+        />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={theme.colors.inkBlack} />
           <Text style={styles.statusText}>LOADING SESSION DATA...</Text>
@@ -208,6 +214,11 @@ export function GameScreen() {
   if (!game || (!isPlayer1 && !isPlayer2)) {
     return (
       <GridBackground>
+        <StatusBar 
+          barStyle="dark-content" 
+          backgroundColor={theme.colors.background} 
+          translucent={false}
+        />
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>SESSION NOT FOUND</Text>
@@ -220,6 +231,11 @@ export function GameScreen() {
 
   return (
     <GridBackground>
+      <StatusBar 
+        barStyle="dark-content" 
+        backgroundColor={theme.colors.background} 
+        translucent={false}
+      />
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {/* Session Header */}
