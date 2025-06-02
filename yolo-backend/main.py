@@ -17,6 +17,7 @@ from sqlalchemy import create_engine, Column, String, DateTime, Text, Integer, B
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 import shutil
 from pathlib import Path
+import re
 
 app = FastAPI(title="Twovue Game API", version="1.0.0")
 
@@ -457,25 +458,71 @@ async def detect_llm(data: ImageData):
             result = response.json()
             raw_content = result['choices'][0]['message']['content']
             
-            # Parse the comma-separated list
-            labels = [obj.strip().lower() for obj in raw_content.split(',')]
-            labels = list(dict.fromkeys([label for label in labels if label]))
+            # Improved parsing to extract only object names
+            # Handle different response formats from the LLM
+            content_lower = raw_content.lower()
             
-            # Filter out abstract concepts
-            filtered_labels = [
-                label for label in labels 
-                if len(label) > 2 and label not in ['the', 'and', 'or', 'a', 'an']
+            # Look for common list indicators and extract the list portion
+            if ":" in raw_content and any(indicator in content_lower for indicator in ["objects", "items", "list"]):
+                # Split on colons and take the part after the first colon
+                parts = raw_content.split(":", 1)
+                if len(parts) > 1:
+                    list_part = parts[1]
+                else:
+                    list_part = raw_content
+            else:
+                list_part = raw_content
+            
+            # Clean up and parse objects
+            # Remove common conversational phrases
+            unwanted_phrases = [
+                "sure", "here's", "here are", "i can see", "i see", "the image shows",
+                "in the image", "from the image", "i can identify", "objects include",
+                "here's a list", "here are the", "list of objects", "detected objects"
             ]
             
-            print(f"LLM detected {len(filtered_labels)} objects after filtering")
+            # Split by common delimiters
+            if "," in list_part:
+                objects = [obj.strip() for obj in list_part.split(",")]
+            elif "\n" in list_part:
+                objects = [obj.strip() for obj in list_part.split("\n")]
+            else:
+                # Single object or space-separated
+                objects = [obj.strip() for obj in list_part.split()]
+            
+            # Clean each object
+            cleaned_objects = []
+            for obj in objects:
+                # Remove numbers, bullets, dashes from start
+                obj = re.sub(r'^[\d\.\-\*\•\s]+', '', obj)
+                # Remove common prefixes
+                for phrase in unwanted_phrases:
+                    if phrase in obj.lower():
+                        obj = re.sub(re.escape(phrase), '', obj, flags=re.IGNORECASE)
+                
+                obj = obj.strip().strip('.,!?;:"()[]{}').lower()
+                
+                # Filter out invalid entries
+                if (len(obj) > 2 and 
+                    obj not in ['the', 'and', 'or', 'a', 'an', 'is', 'are', 'it', 'this', 'that'] and
+                    not obj.startswith('http') and
+                    not any(phrase in obj for phrase in unwanted_phrases)):
+                    cleaned_objects.append(obj)
+            
+            # Remove duplicates while preserving order
+            labels = list(dict.fromkeys(cleaned_objects))
+            
+            print(f"LLM detected {len(labels)} objects after cleaning")
+            print(f"Raw content: {raw_content[:100]}...")
+            print(f"Cleaned objects: {labels[:10]}...")
             
             return {
-                "labels": filtered_labels[:30],
+                "labels": labels[:30],
                 "raw_response": raw_content,
                 "debug": {
                     "source": "openai",
-                    "original_count": len(labels),
-                    "filtered_count": len(filtered_labels)
+                    "original_count": len(objects),
+                    "cleaned_count": len(labels)
                 }
             }
         else:

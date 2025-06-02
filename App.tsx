@@ -4,6 +4,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { GameScreen } from './src/screens/GameScreen';
+import { CameraScreen } from './src/screens/CameraScreen';
 import { theme } from './src/styles/theme';
 
 const Stack = createStackNavigator();
@@ -15,9 +16,9 @@ export default function App() {
         initialRouteName="Home"
         screenOptions={{
           headerStyle: {
-            backgroundColor: theme.colors.agedVellum,
+            backgroundColor: theme.colors.paperBeige,
             borderBottomWidth: theme.layout.borderWidth.normal,
-            borderBottomColor: theme.colors.graphiteBlack,
+            borderBottomColor: theme.colors.inkBlack,
             shadowOpacity: 0, // Remove default shadow
             elevation: 0, // Remove default shadow on Android
           },
@@ -25,18 +26,18 @@ export default function App() {
             fontFamily: theme.typography.primary.fontFamily,
             fontWeight: theme.typography.primary.fontWeight,
             fontSize: theme.typography.sizes.lg,
-            color: theme.colors.graphiteBlack,
-            textTransform: theme.typography.primary.textTransform,
+            color: theme.colors.inkBlack,
+            textTransform: 'uppercase',
             letterSpacing: 1,
           },
           headerBackTitleStyle: {
             fontFamily: theme.typography.secondary.fontFamily,
             fontWeight: theme.typography.secondary.fontWeight,
-            color: theme.colors.fadedInkBlue,
+            color: theme.colors.fadedBlue,
           },
-          headerTintColor: theme.colors.fadedInkBlue,
+          headerTintColor: theme.colors.fadedBlue,
           cardStyle: {
-            backgroundColor: theme.colors.agedVellum,
+            backgroundColor: theme.colors.paperBeige,
           },
         }}
       >
@@ -67,6 +68,14 @@ export default function App() {
           component={GameScreen}
           options={{ 
             title: 'ANALYSIS SESSION',
+          }}
+        />
+        <Stack.Screen 
+          name="Camera" 
+          component={CameraScreen}
+          options={{ 
+            title: 'CAPTURE SYSTEM',
+            headerShown: false, // Full-screen camera experience
           }}
         />
       </Stack.Navigator>

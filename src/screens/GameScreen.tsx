@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,37 +10,29 @@ import {
   Alert,
   Image,
   Share,
-  Platform,
   Clipboard,
+  Dimensions,
 } from 'react-native';
-import { Camera, CameraType, CameraView } from 'expo-camera';
-import * as MediaLibrary from 'expo-media-library';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Storage } from '../utils/storage';
 import { GameAPI } from '../services/api';
 import { Game, Turn } from '../types/game';
 import { GridBackground } from '../components/GridBackground';
-import { ScientificButton } from '../components/ScientificButton';
 import { theme } from '../styles/theme';
 import { formatGameIdForDisplay } from '../utils/gameIdGenerator';
 import { WebSocketService } from '../services/websocket';
+
+const { width } = Dimensions.get('window');
 
 export function GameScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
   const { gameId } = route.params;
-  const cameraRef = useRef<CameraView>(null);
 
   const [playerName, setPlayerName] = useState<string>('');
   const [game, setGame] = useState<Game | null>(null);
   const [loading, setLoading] = useState(true);
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [detectedObjects, setDetectedObjects] = useState<string[]>([]);
-  const [selectedObjects, setSelectedObjects] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [turnSubmitted, setTurnSubmitted] = useState(false);
 
   // Load game data
   const loadGame = useCallback(async () => {
@@ -63,7 +55,7 @@ export function GameScreen() {
       }
     } catch (error) {
       console.error('Error loading game:', error);
-      Alert.alert('Error', 'Failed to load game');
+      setError('Failed to load game session');
     } finally {
       setLoading(false);
     }
@@ -72,17 +64,6 @@ export function GameScreen() {
   useEffect(() => {
     loadGame();
   }, [loadGame]);
-
-  // Request camera permissions
-  useEffect(() => {
-    (async () => {
-      const { status } = await Camera.requestCameraPermissionsAsync();
-      setHasPermission(status === 'granted');
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Camera permission is required to play this game');
-      }
-    })();
-  }, []);
 
   // WebSocket connection for real-time updates
   useEffect(() => {
@@ -95,12 +76,12 @@ export function GameScreen() {
       console.log('🔔 WebSocket message received:', message);
       
       if (message.type === 'player_joined') {
-        Alert.alert('Player Joined!', `${message.player_name} joined the game!`);
+        Alert.alert('Player Joined!', `${message.player_name} joined the session!`);
         loadGame(); // Reload to show updated game state
       }
       
       if (message.type === 'turn_submitted') {
-        Alert.alert('Turn Submitted!', `${message.player_name} submitted their turn!`);
+        Alert.alert('Turn Submitted!', `${message.player_name} submitted their analysis!`);
         loadGame(); // Reload to show new turn
       }
     };
@@ -109,7 +90,6 @@ export function GameScreen() {
     
     return () => {
       wsService.removeListener(handleMessage);
-      // Don't disconnect here - keep connection alive for the game
     };
   }, [gameId, loadGame]);
 
@@ -122,162 +102,26 @@ export function GameScreen() {
   const prevTurn = turns.length > 0 ? turns[turns.length - 1] : null;
   const prevTags = prevTurn ? prevTurn.tags : [];
 
-  const takePicture = async () => {
-    if (!cameraRef.current) return;
-
-    setIsProcessing(true);
-    setError(null);
-
-    try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-        skipProcessing: false,
-      });
-
-      if (photo) {
-        setPhoto(photo.uri);
-        
-        try {
-          // Save to camera roll
-          await MediaLibrary.saveToLibraryAsync(photo.uri);
-        } catch (saveError) {
-          console.error('Error saving to library:', saveError);
-          // Continue even if save fails
-        }
-
-        try {
-          // Detect objects
-          const result = await GameAPI.detectObjects(photo.uri);
-          const objects = result.labels.slice(0, 20);
-          
-          if (objects.length === 0) {
-            setError('No objects detected. Try taking a photo with more recognizable objects.');
-          }
-          
-          setDetectedObjects(objects);
-          
-          // Show debug info in development
-          if (__DEV__ && result.debug) {
-            console.log('Detection Debug Info:', result.debug);
-            console.log('Raw Response:', result.raw_response);
-            
-            // Only show alert if using mock data (fallback)
-            if (result.debug.source === 'mock') {
-              Alert.alert(
-                'Debug Info',
-                `Fallback to mock data - AI detection failed\nCount: ${result.debug.count}`,
-                [{ text: 'OK' }]
-              );
-            }
-          }
-        } catch (detectError: any) {
-          console.error('Object detection error:', detectError);
-          setError(`Object detection failed: ${detectError.message || 'Network error'}. Make sure you're on the same WiFi network.`);
-        }
-      }
-    } catch (error: any) {
-      console.error('Camera error:', error);
-      setError(`Camera error: ${error.message || 'Unknown error'}`);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const retakePicture = () => {
-    setPhoto(null);
-    setDetectedObjects([]);
-    setSelectedObjects([]);
-    setError(null);
-    setTurnSubmitted(false);
-  };
-
-  const toggleObject = (object: string) => {
-    setSelectedObjects((prev) => {
-      if (prev.includes(object)) {
-        return prev.filter((o) => o !== object);
-      }
-      const maxSelection = currentTurn === 1 ? 3 : 2;
-      if (prev.length < maxSelection) {
-        return [...prev, object];
-      }
-      return prev;
+  const navigateToCamera = () => {
+    navigation.navigate('Camera', {
+      gameId,
+      playerName,
+      currentTurn,
+      prevTags,
     });
-  };
-
-  const canSubmit = () => {
-    if (!photo || !detectedObjects.length) return false;
-    if (currentTurn === 1) {
-      return selectedObjects.length === 3;
-    }
-    // For turn 2+: Must have at least one shared tag and user selects 2 additional
-    const sharedTag = prevTags.find((tag) => detectedObjects.includes(tag));
-    return sharedTag && selectedObjects.length === 2;
-  };
-
-  const submitTurn = async () => {
-    setError(null);
-    
-    if (currentTurn === 1 && selectedObjects.length !== 3) {
-      setError('Please select exactly 3 tags.');
-      return;
-    }
-
-    if (currentTurn > 1) {
-      const sharedTag = prevTags.find((tag) => detectedObjects.includes(tag));
-      if (!sharedTag) {
-        setError('Your photo must contain at least one of the previous tags.');
-        return;
-      }
-      if (selectedObjects.length !== 2) {
-        setError('Please select exactly 2 new tags (the shared tag is automatically included).');
-        return;
-      }
-
-      try {
-        // Combine shared tag with user-selected tags
-        const allTags = [sharedTag, ...selectedObjects];
-        await GameAPI.submitTurn(gameId, {
-          player_name: playerName,
-          photo_url: photo!,
-          tags: allTags,
-          shared_tag: sharedTag,
-          detected_tags: detectedObjects,
-        });
-        setTurnSubmitted(true);
-        await loadGame();
-      } catch (error) {
-        Alert.alert('Error', 'Failed to submit turn');
-      }
-      return;
-    }
-
-    // First turn
-    try {
-      await GameAPI.submitTurn(gameId, {
-        player_name: playerName,
-        photo_url: photo!,
-        tags: selectedObjects,
-        shared_tag: selectedObjects[0],
-        detected_tags: detectedObjects,
-      });
-      setTurnSubmitted(true);
-      await loadGame();
-    } catch (error) {
-      Alert.alert('Error', 'Failed to submit turn');
-    }
   };
 
   const shareGame = async () => {
     const gameIdDisplay = formatGameIdForDisplay(gameId);
-    const message = `Join my Twovue game! Game ID: ${gameIdDisplay}\n\nOpen the Twovue app and enter this Game ID to join.`;
+    const message = `Join my Twovue session! Game ID: ${gameIdDisplay}\n\nOpen the Twovue app and enter this Game ID to join.`;
     
     try {
       await Share.share({
         message,
-        title: 'Join my Twovue Game!',
+        title: 'Join my Twovue Session!',
       });
     } catch (error) {
-      Alert.alert('Error', 'Failed to share game');
+      Alert.alert('Error', 'Failed to share game session');
     }
   };
 
@@ -287,11 +131,75 @@ export function GameScreen() {
     Alert.alert('Copied!', `Game ID "${gameIdDisplay}" copied to clipboard`);
   };
 
-  if (loading || hasPermission === null) {
+  const renderCarouselCard = (turn: Turn, index: number) => (
+    <View key={turn.id} style={styles.carouselCard}>
+      <Text style={styles.cardHeader}>
+        TURN {turn.turnNumber} — {turn.playerName.toUpperCase()}
+      </Text>
+      <View style={styles.imageContainer}>
+        <Image 
+          source={{ uri: turn.photoUrl }} 
+          style={styles.cardImage}
+          resizeMode="cover"
+        />
+      </View>
+      <View style={styles.tagsContainer}>
+        {turn.tags.map((tag, tagIndex) => (
+          <View key={tag} style={styles.tagBox}>
+            <Text style={styles.tagText}>
+              {tagIndex + 1}. {tag.toUpperCase()}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+
+  const renderActionCard = () => {
+    if (myTurn) {
+      return (
+        <View style={styles.carouselCard}>
+          <Text style={styles.cardHeader}>
+            TURN {currentTurn} — YOUR ANALYSIS
+          </Text>
+          <TouchableOpacity style={styles.captureCard} onPress={navigateToCamera}>
+            <View style={styles.captureIcon}>
+              <Text style={styles.captureSymbol}>📷</Text>
+            </View>
+            <Text style={styles.captureText}>TAP TO CAPTURE</Text>
+            <Text style={styles.captureSubtext}>
+              {currentTurn === 1 ? 'Select 3 objects' : 'Find shared object + 2 new'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      );
+    } else {
+      return (
+        <View style={styles.carouselCard}>
+          <Text style={styles.cardHeader}>
+            TURN {currentTurn} — AWAITING ANALYSIS
+          </Text>
+          <View style={styles.waitingCard}>
+            <ActivityIndicator size="large" color={theme.colors.fadedBlue} />
+            <Text style={styles.waitingText}>AWAITING OPERATOR</Text>
+            <Text style={styles.waitingSubtext}>
+              {game?.player2Name ? 
+                `${isPlayer1 ? game.player2Name : game.player1Name} is analyzing...` :
+                'Waiting for second player to join...'
+              }
+            </Text>
+          </View>
+        </View>
+      );
+    }
+  };
+
+  if (loading) {
     return (
       <GridBackground>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.graphiteBlack} />
+          <ActivityIndicator size="large" color={theme.colors.inkBlack} />
+          <Text style={styles.statusText}>LOADING SESSION DATA...</Text>
         </View>
       </GridBackground>
     );
@@ -301,7 +209,10 @@ export function GameScreen() {
     return (
       <GridBackground>
         <SafeAreaView style={styles.safeArea}>
-          <Text style={styles.errorText}>Unable to load game</Text>
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>SESSION NOT FOUND</Text>
+            <Text style={styles.statusText}>Unable to load game session</Text>
+          </View>
         </SafeAreaView>
       </GridBackground>
     );
@@ -311,204 +222,61 @@ export function GameScreen() {
     <GridBackground>
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Header with scientific labeling */}
+          {/* Session Header */}
           <View style={styles.header}>
-            <View style={styles.labelFrame}>
-              <Text style={styles.figureLabel}>FIG. {currentTurn}A — CAPTURE SESSION</Text>
-              <View style={styles.gameIdContainer}>
-                <Text style={styles.gameId}>GAME ID: {formatGameIdForDisplay(gameId)}</Text>
-                <TouchableOpacity onPress={copyGameId} style={styles.copyButton}>
-                  <Text style={styles.copyButtonText}>COPY</Text>
-                </TouchableOpacity>
+            <View style={styles.sessionFrame}>
+              <Text style={styles.sessionLabel}>SESSION {formatGameIdForDisplay(gameId)}</Text>
+              <View style={styles.sessionInfo}>
+                <Text style={styles.sessionDetail}>
+                  OPERATOR 1: {game.player1Name?.toUpperCase() || 'UNKNOWN'}
+                </Text>
+                <Text style={styles.sessionDetail}>
+                  OPERATOR 2: {game.player2Name?.toUpperCase() || 'PENDING'}
+                </Text>
+                <Text style={styles.sessionDetail}>
+                  ANALYSES COMPLETED: {turns.length}
+                </Text>
               </View>
+              <TouchableOpacity onPress={copyGameId} style={styles.copyButton}>
+                <Text style={styles.copyButtonText}>COPY SESSION ID</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
-          {/* Controls panel */}
-          <View style={styles.controlsFrame}>
-            <View style={styles.controlsContainer}>
-              <Text style={styles.statusLabel}>AI VISION ACTIVE</Text>
-            </View>
+          {/* Analysis Timeline */}
+          <View style={styles.timelineContainer}>
+            <Text style={styles.timelineTitle}>
+              ANALYSIS TIMELINE
+            </Text>
+            
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={styles.carousel}
+              snapToInterval={width * 0.8 + 16}
+              decelerationRate="fast"
+              contentContainerStyle={styles.carouselContent}
+            >
+              {/* Historical turns */}
+              {turns.map((turn, index) => renderCarouselCard(turn, index))}
+              
+              {/* Action card (capture or waiting) */}
+              {renderActionCard()}
+            </ScrollView>
           </View>
 
-          {prevTurn && (
-            <View style={styles.previousTurnFrame}>
-              <Text style={styles.sectionTitle}>PREVIOUS SPECIMEN</Text>
-              <View style={styles.imageFrame}>
-                <Image 
-                  source={{ uri: prevTurn.photoUrl }} 
-                  style={styles.previousImage}
-                  resizeMode="cover"
-                />
-              </View>
-              <View style={styles.tagsContainer}>
-                {prevTurn.tags.map((tag, index) => (
-                  <View key={tag} style={styles.tag}>
-                    <Text style={styles.tagText}>{`${index + 1}. ${tag.toUpperCase()}`}</Text>
-                  </View>
-                ))}
-              </View>
+          {/* Share button */}
+          {!game.player2Name && (
+            <View style={styles.shareContainer}>
+              <TouchableOpacity style={styles.shareButton} onPress={shareGame}>
+                <Text style={styles.shareText}>INVITE SECOND OPERATOR</Text>
+              </TouchableOpacity>
             </View>
           )}
 
-          {myTurn && !turnSubmitted && (
-            <View style={styles.gameContent}>
-              {!photo ? (
-                <>
-                  {hasPermission ? (
-                    <View style={styles.cameraFrame}>
-                      <Text style={styles.sectionTitle}>OPTICAL CAPTURE FIELD</Text>
-                      <View style={styles.cameraContainer}>
-                        <CameraView 
-                          ref={cameraRef} 
-                          style={styles.camera}
-                          facing="back"
-                        />
-                        <View style={styles.viewfinderOverlay}>
-                          <View style={styles.cornerNotch} />
-                          <View style={[styles.cornerNotch, styles.topRight]} />
-                          <View style={[styles.cornerNotch, styles.bottomLeft]} />
-                          <View style={[styles.cornerNotch, styles.bottomRight]} />
-                        </View>
-                        <ScientificButton
-                          title={isProcessing ? 'Processing...' : 'Capture'}
-                          onPress={takePicture}
-                          disabled={isProcessing}
-                          variant="accent"
-                          style={styles.captureButton}
-                        />
-                      </View>
-                    </View>
-                  ) : (
-                    <Text style={styles.errorText}>Camera permission required</Text>
-                  )}
-                </>
-              ) : (
-                <View style={styles.photoReview}>
-                  <Text style={styles.sectionTitle}>SPECIMEN ANALYSIS</Text>
-                  <View style={[styles.imageFrame, { height: 300 }]}>
-                    <Image 
-                      source={{ uri: photo }} 
-                      style={styles.capturedImage}
-                      resizeMode="cover"
-                    />
-                  </View>
-                  
-                  <ScientificButton
-                    title="Retake"
-                    onPress={retakePicture}
-                    variant="secondary"
-                    size="small"
-                    style={styles.retakeButton}
-                  />
-
-                  {detectedObjects.length > 0 && (
-                    <View style={styles.objectsSection}>
-                      <Text style={styles.sectionTitle}>
-                        OBJECT CLASSIFICATION ({detectedObjects.length} DETECTED):
-                      </Text>
-                      
-                      {/* Show shared tag info for turn 2+ */}
-                      {currentTurn > 1 && (
-                        <View style={styles.sharedTagInfo}>
-                          {(() => {
-                            const sharedTag = prevTags.find((tag) => detectedObjects.includes(tag));
-                            return sharedTag ? (
-                              <Text style={styles.sharedTagText}>
-                                🔗 SHARED TAG: {sharedTag.toUpperCase()} (automatically included)
-                              </Text>
-                            ) : (
-                              <Text style={styles.errorText}>
-                                ⚠️ No shared tag detected. Photo must contain one of: {prevTags.join(', ').toUpperCase()}
-                              </Text>
-                            );
-                          })()}
-                        </View>
-                      )}
-                      
-                      <ScrollView 
-                        horizontal 
-                        showsHorizontalScrollIndicator={false}
-                        style={styles.objectsScrollView}
-                      >
-                        <View style={styles.objectsGrid}>
-                          {detectedObjects.map((object, index) => {
-                            const isSharedTag = currentTurn > 1 && prevTags.includes(object);
-                            const isSelected = selectedObjects.includes(object);
-                            const isDisabled = isSharedTag; // Shared tags are auto-included, not selectable
-                            
-                            return (
-                              <TouchableOpacity
-                                key={object}
-                                style={[
-                                  styles.objectButton,
-                                  isSelected && styles.objectButtonSelected,
-                                  isSharedTag && styles.objectButtonShared,
-                                  isDisabled && styles.objectButtonDisabled,
-                                ]}
-                                onPress={() => !isDisabled && toggleObject(object)}
-                                disabled={isDisabled}
-                              >
-                                <Text style={styles.objectIndex}>{index + 1}</Text>
-                                <Text
-                                  style={[
-                                    styles.objectButtonText,
-                                    isSelected && styles.objectButtonTextSelected,
-                                    isSharedTag && styles.objectButtonTextShared,
-                                  ]}
-                                >
-                                  {object.toUpperCase()}
-                                  {isSharedTag && ' 🔗'}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      </ScrollView>
-
-                      <Text style={styles.selectionHint}>
-                        {currentTurn === 1 
-                          ? `Select exactly 3 tags (${selectedObjects.length}/3 selected)`
-                          : `Select exactly 2 new tags (${selectedObjects.length}/2 selected)`
-                        }
-                      </Text>
-
-                      <ScientificButton
-                        title="Submit Analysis"
-                        onPress={submitTurn}
-                        disabled={!canSubmit()}
-                        variant="primary"
-                        style={styles.submitButton}
-                      />
-                    </View>
-                  )}
-
-                  {error && (
-                    <View style={styles.errorFrame}>
-                      <Text style={styles.errorLabel}>ERROR:</Text>
-                      <Text style={styles.errorText}>{error}</Text>
-                    </View>
-                  )}
-                </View>
-              )}
-
-              {turnSubmitted && (
-                <View style={styles.turnSubmittedFrame}>
-                  <Text style={styles.successText}>ANALYSIS SUBMITTED</Text>
-                  <ScientificButton
-                    title="Share Game ID"
-                    onPress={shareGame}
-                    variant="accent"
-                    style={styles.shareButton}
-                  />
-                </View>
-              )}
-
-              {!myTurn && (
-                <View style={styles.waitingFrame}>
-                  <Text style={styles.waitingText}>AWAITING OPERATOR RESPONSE...</Text>
-                </View>
-              )}
+          {error && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
         </ScrollView>
@@ -534,291 +302,196 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.margin.mobile,
     paddingVertical: theme.spacing.lg,
   },
-  labelFrame: {
+  sessionFrame: {
     borderWidth: theme.layout.borderWidth.normal,
-    borderColor: theme.colors.graphiteBlack,
+    borderColor: theme.colors.inkBlack,
     borderStyle: 'dashed',
     padding: theme.spacing.md,
     backgroundColor: 'rgba(231, 220, 197, 0.8)',
   },
-  figureLabel: {
+  sessionLabel: {
     ...theme.typography.primary,
-    fontSize: theme.typography.sizes.sm,
-    color: theme.colors.graphiteBlack,
-    marginBottom: theme.spacing.xs,
+    fontSize: theme.typography.sizes.lg,
+    color: theme.colors.inkBlack,
+    marginBottom: theme.spacing.md,
+    textTransform: 'uppercase',
   },
-  gameIdContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  sessionInfo: {
+    marginBottom: theme.spacing.md,
   },
-  gameId: {
+  sessionDetail: {
     ...theme.typography.secondary,
     fontSize: theme.typography.sizes.xs,
-    color: theme.colors.fadedInkBlue,
+    color: theme.colors.fadedBlue,
+    marginBottom: theme.spacing.xs,
+    textTransform: 'uppercase',
   },
   copyButton: {
-    padding: theme.spacing.md,
+    padding: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.fadedBlue,
+    backgroundColor: 'transparent',
   },
   copyButtonText: {
-    ...theme.typography.primary,
+    ...theme.typography.secondary,
     fontSize: theme.typography.sizes.xs,
-    color: theme.colors.fadedInkBlue,
+    color: theme.colors.fadedBlue,
+    textTransform: 'uppercase',
   },
-  controlsFrame: {
+  timelineContainer: {
     marginHorizontal: theme.spacing.margin.mobile,
     marginBottom: theme.spacing.lg,
-    borderWidth: theme.layout.borderWidth.thin,
-    borderColor: theme.colors.softGridGray,
-    borderStyle: 'solid',
-    backgroundColor: 'rgba(245, 240, 232, 0.6)',
   },
-  controlsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: theme.spacing.md,
-  },
-  statusLabel: {
-    ...theme.typography.primary,
-    fontSize: theme.typography.sizes.sm,
-    color: theme.colors.archiveRed,
-    letterSpacing: 1,
-  },
-  previousTurnFrame: {
-    marginHorizontal: theme.spacing.margin.mobile,
-    marginBottom: theme.spacing.lg,
-    borderWidth: theme.layout.borderWidth.normal,
-    borderColor: theme.colors.fadedInkBlue,
-    padding: theme.spacing.md,
-  },
-  sectionTitle: {
+  timelineTitle: {
     ...theme.typography.primary,
     fontSize: theme.typography.sizes.md,
-    color: theme.colors.graphiteBlack,
+    color: theme.colors.inkBlack,
     marginBottom: theme.spacing.md,
+    textTransform: 'uppercase',
   },
-  imageFrame: {
+  carousel: {
+    marginBottom: theme.spacing.lg,
+  },
+  carouselContent: {
+    paddingHorizontal: theme.spacing.sm,
+  },
+  carouselCard: {
+    width: width * 0.8,
+    marginRight: theme.spacing.md,
+    padding: theme.spacing.md,
     borderWidth: theme.layout.borderWidth.normal,
-    borderColor: theme.colors.graphiteBlack,
+    borderColor: theme.colors.inkBlack,
+    borderStyle: 'solid',
+    backgroundColor: 'rgba(231, 220, 197, 0.9)',
+  },
+  cardHeader: {
+    ...theme.typography.annotation,
+    fontSize: theme.typography.sizes.sm,
+    color: theme.colors.inkBlack,
     marginBottom: theme.spacing.md,
-    height: 200,
+    textTransform: 'uppercase',
+  },
+  imageContainer: {
+    borderWidth: theme.layout.borderWidth.normal,
+    borderColor: theme.colors.inkBlack,
+    marginBottom: theme.spacing.md,
+    height: 150,
     width: '100%',
     backgroundColor: theme.colors.surface,
   },
-  previousImage: {
+  cardImage: {
     width: '100%',
     height: '100%',
     borderRadius: 0,
   },
   tagsContainer: {
-    gap: theme.spacing.sm,
+    gap: theme.spacing.xs,
   },
-  tag: {
+  tagBox: {
     borderWidth: theme.layout.borderWidth.thin,
-    borderColor: theme.colors.fadedInkBlue,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
+    borderColor: theme.colors.fadedBlue,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
     borderStyle: 'dashed',
   },
   tagText: {
     ...theme.typography.secondary,
-    fontSize: theme.typography.sizes.sm,
-    color: theme.colors.fadedInkBlue,
+    fontSize: theme.typography.sizes.xs,
+    color: theme.colors.fadedBlue,
   },
-  gameContent: {
-    paddingHorizontal: theme.spacing.margin.mobile,
-  },
-  cameraFrame: {
-    marginBottom: theme.spacing.lg,
-  },
-  cameraContainer: {
-    position: 'relative',
+  captureCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: theme.spacing.xl,
     borderWidth: theme.layout.borderWidth.thick,
-    borderColor: theme.colors.graphiteBlack,
-    borderRadius: theme.layout.borderRadius.sm,
-    overflow: 'hidden',
-    height: 400,
-  },
-  camera: {
-    flex: 1,
-  },
-  viewfinderOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    pointerEvents: 'none',
-  },
-  cornerNotch: {
-    position: 'absolute',
-    width: 20,
-    height: 20,
     borderColor: theme.colors.archiveRed,
-    borderWidth: 2,
-    top: 10,
-    left: 10,
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
-  },
-  topRight: {
-    right: 10,
-    left: 'auto',
-    borderLeftWidth: 0,
-    borderRightWidth: 2,
-  },
-  bottomLeft: {
-    bottom: 10,
-    top: 'auto',
-    borderTopWidth: 0,
-    borderBottomWidth: 2,
-  },
-  bottomRight: {
-    bottom: 10,
-    right: 10,
-    top: 'auto',
-    left: 'auto',
-    borderTopWidth: 0,
-    borderLeftWidth: 0,
-    borderRightWidth: 2,
-    borderBottomWidth: 2,
-  },
-  captureButton: {
-    position: 'absolute',
-    bottom: theme.spacing.lg,
-    alignSelf: 'center',
-  },
-  photoReview: {
-    alignItems: 'center',
-    width: '100%',
-  },
-  capturedImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 0,
-  },
-  retakeButton: {
-    marginVertical: theme.spacing.lg,
-  },
-  objectsSection: {
-    width: '100%',
-    marginTop: theme.spacing.lg,
-  },
-  objectsScrollView: {
-    maxHeight: 120,
-    marginBottom: theme.spacing.lg,
-  },
-  objectsGrid: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-    paddingVertical: theme.spacing.sm,
-  },
-  objectButton: {
-    borderWidth: theme.layout.borderWidth.normal,
-    borderColor: theme.colors.graphiteBlack,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.layout.borderRadius.sm,
-    backgroundColor: theme.colors.agedVellum,
-    minWidth: 80,
-    alignItems: 'center',
-  },
-  objectButtonSelected: {
-    backgroundColor: theme.colors.archiveRed,
-    borderColor: theme.colors.archiveRed,
-  },
-  objectButtonShared: {
-    backgroundColor: theme.colors.fadedInkBlue,
-    borderColor: theme.colors.fadedInkBlue,
-  },
-  objectButtonDisabled: {
-    backgroundColor: theme.colors.softGridGray,
-    borderColor: theme.colors.softGridGray,
-  },
-  objectIndex: {
-    ...theme.typography.secondary,
-    fontSize: theme.typography.sizes.xs,
-    color: theme.colors.fadedInkBlue,
-    marginBottom: theme.spacing.xs,
-  },
-  objectButtonText: {
-    ...theme.typography.primary,
-    fontSize: theme.typography.sizes.xs,
-    color: theme.colors.graphiteBlack,
-    textAlign: 'center',
-  },
-  objectButtonTextSelected: {
-    color: theme.colors.agedVellum,
-  },
-  objectButtonTextShared: {
-    color: theme.colors.agedVellum,
-  },
-  submitButton: {
-    marginTop: theme.spacing.lg,
-  },
-  errorFrame: {
-    borderWidth: theme.layout.borderWidth.normal,
-    borderColor: theme.colors.archiveRed,
-    padding: theme.spacing.md,
-    marginTop: theme.spacing.lg,
+    borderStyle: 'solid',
     backgroundColor: 'rgba(164, 70, 60, 0.1)',
+    minHeight: 150,
   },
-  errorLabel: {
+  captureIcon: {
+    marginBottom: theme.spacing.md,
+  },
+  captureSymbol: {
+    fontSize: theme.typography.sizes.xxl,
+  },
+  captureText: {
     ...theme.typography.primary,
-    fontSize: theme.typography.sizes.sm,
+    fontSize: theme.typography.sizes.md,
     color: theme.colors.archiveRed,
-    marginBottom: theme.spacing.xs,
+    marginBottom: theme.spacing.sm,
+    textTransform: 'uppercase',
   },
-  errorText: {
+  captureSubtext: {
     ...theme.typography.secondary,
-    fontSize: theme.typography.sizes.sm,
-    color: theme.colors.archiveRed,
+    fontSize: theme.typography.sizes.xs,
+    color: theme.colors.fadedBlue,
     textAlign: 'center',
+    textTransform: 'uppercase',
   },
-  turnSubmittedFrame: {
+  waitingCard: {
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.margin.mobile,
-    paddingVertical: theme.spacing.xxl,
+    justifyContent: 'center',
+    padding: theme.spacing.xl,
     borderWidth: theme.layout.borderWidth.normal,
-    borderColor: theme.colors.fadedInkBlue,
-    marginHorizontal: theme.spacing.margin.mobile,
+    borderColor: theme.colors.fadedBlue,
+    borderStyle: 'dashed',
     backgroundColor: 'rgba(74, 98, 116, 0.1)',
+    minHeight: 150,
   },
-  successText: {
+  waitingText: {
     ...theme.typography.primary,
-    fontSize: theme.typography.sizes.lg,
-    color: theme.colors.fadedInkBlue,
+    fontSize: theme.typography.sizes.md,
+    color: theme.colors.fadedBlue,
+    marginTop: theme.spacing.md,
+    textTransform: 'uppercase',
+  },
+  waitingSubtext: {
+    ...theme.typography.secondary,
+    fontSize: theme.typography.sizes.xs,
+    color: theme.colors.fadedBlue,
+    textAlign: 'center',
+    marginTop: theme.spacing.sm,
+  },
+  shareContainer: {
+    marginHorizontal: theme.spacing.margin.mobile,
     marginBottom: theme.spacing.lg,
   },
   shareButton: {
-    marginTop: theme.spacing.lg,
-  },
-  waitingFrame: {
+    padding: theme.spacing.lg,
+    borderWidth: theme.layout.borderWidth.normal,
+    borderColor: theme.colors.archiveRed,
+    backgroundColor: 'transparent',
     alignItems: 'center',
-    paddingVertical: theme.spacing.xxl,
-    marginHorizontal: theme.spacing.margin.mobile,
-    borderWidth: theme.layout.borderWidth.thin,
-    borderColor: theme.colors.softGridGray,
-    borderStyle: 'dashed',
   },
-  waitingText: {
+  shareText: {
     ...theme.typography.secondary,
     fontSize: theme.typography.sizes.md,
-    color: theme.colors.fadedInkBlue,
+    color: theme.colors.archiveRed,
+    textTransform: 'uppercase',
+  },
+  errorContainer: {
+    marginHorizontal: theme.spacing.margin.mobile,
+    marginTop: theme.spacing.lg,
+    padding: theme.spacing.md,
+    borderWidth: theme.layout.borderWidth.normal,
+    borderColor: theme.colors.archiveRed,
+    borderStyle: 'solid',
+    backgroundColor: 'rgba(164, 70, 60, 0.1)',
+  },
+  errorText: {
+    ...theme.typography.annotation,
+    fontSize: theme.typography.sizes.sm,
+    color: theme.colors.archiveRed,
     textAlign: 'center',
+    textTransform: 'uppercase',
   },
-  sharedTagInfo: {
-    marginBottom: theme.spacing.lg,
-  },
-  sharedTagText: {
-    ...theme.typography.primary,
+  statusText: {
+    ...theme.typography.annotation,
     fontSize: theme.typography.sizes.sm,
-    color: theme.colors.fadedInkBlue,
-  },
-  selectionHint: {
-    ...theme.typography.primary,
-    fontSize: theme.typography.sizes.sm,
-    color: theme.colors.fadedInkBlue,
-    marginBottom: theme.spacing.lg,
+    color: theme.colors.fadedBlue,
+    textAlign: 'center',
+    marginTop: theme.spacing.md,
+    textTransform: 'uppercase',
   },
 }); 
